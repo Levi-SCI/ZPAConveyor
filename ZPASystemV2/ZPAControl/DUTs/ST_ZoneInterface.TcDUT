@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <DUT Name="ST_ZoneInterface" Id="{61cf255c-8274-4738-b4f0-16722283ad81}">
+    <Declaration><![CDATA[TYPE ST_ZoneInterface :
+STRUCT
+	bPE                 : BOOL; // Physical Photo-eye Status
+    bOccupied           : BOOL; // Zone contains product
+    bReadyToReceive     : BOOL; // Zone is clear and ready for product
+    bRunCommand         : BOOL; // Command sent to physical motor
+    bJamFault           : BOOL; // Sensor jam fault flag
+END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

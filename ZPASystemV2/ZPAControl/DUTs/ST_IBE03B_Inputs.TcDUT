@@ -1,0 +1,42 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <DUT Name="ST_IBE03B_Inputs" Id="{d2ae874b-3c58-4698-b3f8-ca717e224610}">
+    <Declaration><![CDATA[TYPE ST_IBE03B_Inputs :
+STRUCT
+	// In[4] - Sensor & Motor Status
+    bSensorA            : BOOL; // Photo-eye A (1 = Blocked)
+    bSensorB            : BOOL; // Photo-eye B (1 = Blocked)
+    bSensorAlarmA       : BOOL; // Sensor A Health
+    bSensorAlarmB       : BOOL; // Sensor B Health
+    bMotorARunning      : BOOL; // Motor A Feedback
+    bMotorBRunning      : BOOL; // Motor B Feedback
+
+    // In[5] - Motor A Faults
+    bErrMotorA_BackEMF  : BOOL;
+    bErrMotorA_Current  : BOOL;
+    bErrMotorA_Thermal  : BOOL;
+    bErrDriverA_Thermal : BOOL;
+    bErrMotorA_Stalled  : BOOL;
+    bErrMotorA_Unplugged: BOOL;
+    bErrMotorA_Jam      : BOOL;
+    bErrMotorA_Sensor   : BOOL;
+
+    // In[6] - Motor B Faults
+    bErrMotorB_BackEMF  : BOOL;
+    bErrMotorB_Current  : BOOL;
+    bErrMotorB_Thermal  : BOOL;
+    bErrDriverB_Thermal : BOOL;
+    bErrMotorB_Stalled  : BOOL;
+    bErrMotorB_Unplugged: BOOL;
+    bErrMotorB_Jam      : BOOL;
+    bErrMotorB_Sensor   : BOOL;
+
+    // In[7] - Auxiliary Discrete Inputs
+    bRemoteIn1          : BOOL; // Remote Input 1 (Infeed trigger on Module 1)
+    bRemoteIn2          : BOOL;
+    bRemoteIn3          : BOOL;
+END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

@@ -1,0 +1,18 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <DUT Name="ST_ControlPanel_In" Id="{ff01e33d-e33c-46e2-b485-8f31a3f91041}">
+    <Declaration><![CDATA[TYPE ST_ControlPanel_In :
+STRUCT
+	// Digital Inputs
+    bStartBtn           : BOOL; // Start Pushbutton (N.O.)
+    bStopBtn            : BOOL; // Stop Pushbutton (N.C. or N.O.)
+    bTandemSwitch       : BOOL; // Selector Switch (ON = Tandem Mode, OFF = Standard)
+    bFootswitch1        : BOOL; // Offload Conv A -> Gravity Y
+    bFootswitch2        : BOOL; // Load Conv B <- Gravity Y
+	bFootswitch3		: BOOL; // Offload Conv B -> To Wrapper
+
+END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

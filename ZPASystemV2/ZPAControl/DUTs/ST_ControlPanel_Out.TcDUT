@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <DUT Name="ST_ControlPanel_Out" Id="{22da5f5f-7bb1-4dd8-b6ca-e41088ff3c45}">
+    <Declaration><![CDATA[TYPE ST_ControlPanel_Out :
+STRUCT
+	// Digital Outputs
+    bStartLED           : BOOL; // Start Button Indicator
+    bStopLED            : BOOL; // Stop Button Indicator
+END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

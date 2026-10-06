@@ -1,0 +1,90 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_SystemControl" Id="{02291408-8e41-46d0-a183-94210f659b89}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_SystemControl
+VAR_INPUT
+    // Physical Control Panel Inputs (CX7000 Local I/O)
+    bStartBtn           : BOOL; // Start Pushbutton (N.O.)
+    bStopBtn            : BOOL; // Stop Pushbutton (N.C. - TRUE when healthy)
+    bTandemSwitch       : BOOL; // 2-Pos Selector Switch (ON = Tandem, OFF = Standard)
+
+    // Global Line Diagnostics
+    bAnyZoneFault       : BOOL; // Combined fault status from all 18 zones
+END_VAR
+
+// Exposed to Ignition SCADA via ADS
+{attribute 'symbol' := 'read'}
+VAR_OUTPUT
+    bSystemEnable       : BOOL; // Global System Active State (Drives ZPA logic)
+    bTandemModeActive   : BOOL; // Global Tandem Mode State
+
+    // Physical Indicator LEDs (CX7000 Local I/O)
+    bStartLED           : BOOL; // Start Button Lamp
+    bStopLED            : BOOL; // Stop Button Lamp
+
+    // SCADA System Status
+    nSystemState        : INT;  // 0 = Stopped, 1 = Running, 2 = Faulted
+
+    // Fault Reset Pulse Output
+    bResetFaults        : BOOL; // 1-cycle pulse fired when Start is pressed to reset faults
+END_VAR
+
+VAR
+    fbFlashTimer        : TON;    // Flasher timer for indicator LEDs
+    bFlash1Hz           : BOOL;   // 1 Hz toggle bit for flashing lamps
+    fbStartTrig         : R_TRIG; // Rising edge trigger for Start button
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// =========================================================================
+// 1. 1 Hz LED FLASHER & RISING EDGE START TRIGGER
+// =========================================================================
+fbFlashTimer(IN := NOT fbFlashTimer.Q, PT := T#500MS);
+IF fbFlashTimer.Q THEN
+    bFlash1Hz := NOT bFlash1Hz;
+END_IF;
+
+// Detect rising edge on Start button to pulse fault resets
+fbStartTrig(CLK := bStartBtn);
+bResetFaults := fbStartTrig.Q;
+
+// =========================================================================
+// 2. START / STOP LATCHING LOGIC
+// =========================================================================
+// Stop button is wired Normally Closed (bStopBtn = TRUE when healthy/unpressed).
+IF NOT bStopBtn THEN
+    bSystemEnable := FALSE;               // Stop button pressed
+ELSIF fbStartTrig.Q THEN
+    bSystemEnable := TRUE;                // Single press resets fault & enables system
+ELSIF bAnyZoneFault THEN
+    bSystemEnable := FALSE;               // Drop enable if a fault persists/re-trips
+END_IF;
+
+// Pass through Selector Switch State for Tandem Mode
+bTandemModeActive := bTandemSwitch;
+
+// =========================================================================
+// 3. PHYSICAL CONTROL PANEL LED INDICATOR LOGIC
+// =========================================================================
+IF bAnyZoneFault THEN
+    // System Faulted: Start LED OFF, Stop LED flashes
+    bStartLED := FALSE;
+    bStopLED  := bFlash1Hz;
+    nSystemState := 2; // SCADA: Faulted
+ELSIF bSystemEnable THEN
+    // System Running: Start LED Solid ON, Stop LED OFF
+    bStartLED := TRUE;
+    bStopLED  := FALSE;
+    nSystemState := 1; // SCADA: Running
+ELSE
+    // System Stopped / Idle: Start LED Flashes (Ready to Start), Stop LED Solid ON
+    bStartLED := bFlash1Hz;
+    bStopLED  := TRUE;
+    nSystemState := 0; // SCADA: Stopped
+END_IF;]]></ST>
+    </Implementation>
+    <LineIds Name="FB_SystemControl">
+      <LineId Id="526" Count="44" />
+      <LineId Id="9" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

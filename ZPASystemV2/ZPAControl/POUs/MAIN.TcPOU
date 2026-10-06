@@ -1,0 +1,1383 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="MAIN" Id="{13190580-4d30-4ce7-8b2a-cbdcde2d3138}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM MAIN
+VAR
+// Local Control Panel I/O
+    stControlPanel_In   AT %I* : ST_ControlPanel_In;
+    stControlPanel_Out  AT %Q* : ST_ControlPanel_Out;
+    
+    // =========================================================================
+    // 1. RAW HARDWARE BYTE ARRAYS (Updated to 64 Bytes / 512 bits)
+    // =========================================================================
+    // Conveyor A (8 Modules)
+    stA1_InBytes  AT %I* : ARRAY[0..63] OF BYTE; // Match 512-bit hardware size
+    stA1_OutBytes AT %Q* : ARRAY[0..63] OF BYTE; // Check output size (16 or 32 Bytes)
+    stA2_InBytes  AT %I* : ARRAY[0..63] OF BYTE;
+    stA2_OutBytes AT %Q* : ARRAY[0..63] OF BYTE;
+    stA3_InBytes  AT %I* : ARRAY[0..63] OF BYTE;
+    stA3_OutBytes AT %Q* : ARRAY[0..63] OF BYTE;
+    stA4_InBytes  AT %I* : ARRAY[0..63] OF BYTE;
+    stA4_OutBytes AT %Q* : ARRAY[0..63] OF BYTE;
+    stA5_InBytes  AT %I* : ARRAY[0..63] OF BYTE;
+    stA5_OutBytes AT %Q* : ARRAY[0..63] OF BYTE;
+    stA6_InBytes  AT %I* : ARRAY[0..63] OF BYTE;
+    stA6_OutBytes AT %Q* : ARRAY[0..63] OF BYTE;
+    stA7_InBytes  AT %I* : ARRAY[0..63] OF BYTE;
+    stA7_OutBytes AT %Q* : ARRAY[0..63] OF BYTE;
+    stA8_InBytes  AT %I* : ARRAY[0..63] OF BYTE;
+    stA8_OutBytes AT %Q* : ARRAY[0..63] OF BYTE;
+
+    // Conveyor B (4 Modules)
+    stB1_InBytes  AT %I* : ARRAY[0..63] OF BYTE;
+    stB1_OutBytes AT %Q* : ARRAY[0..63] OF BYTE;
+    stB2_InBytes  AT %I* : ARRAY[0..63] OF BYTE;
+    stB2_OutBytes AT %Q* : ARRAY[0..63] OF BYTE;
+    stB3_InBytes  AT %I* : ARRAY[0..63] OF BYTE;
+    stB3_OutBytes AT %Q* : ARRAY[0..63] OF BYTE;
+    stB4_InBytes  AT %I* : ARRAY[0..63] OF BYTE;
+    stB4_OutBytes AT %Q* : ARRAY[0..63] OF BYTE;
+
+    // =========================================================================
+    // 2. STRUCTURED PLC LOGIC VARIABLES (Used in ZPA Logic)
+    // =========================================================================
+    stA1_In : ST_IBE03B_Inputs; stA1_Out : ST_IBE03B_Outputs;
+    stA2_In : ST_IBE03B_Inputs; stA2_Out : ST_IBE03B_Outputs;
+    stA3_In : ST_IBE03B_Inputs; stA3_Out : ST_IBE03B_Outputs;
+    stA4_In : ST_IBE03B_Inputs; stA4_Out : ST_IBE03B_Outputs;
+    stA5_In : ST_IBE03B_Inputs; stA5_Out : ST_IBE03B_Outputs;
+    stA6_In : ST_IBE03B_Inputs; stA6_Out : ST_IBE03B_Outputs;
+    stA7_In : ST_IBE03B_Inputs; stA7_Out : ST_IBE03B_Outputs;
+    stA8_In : ST_IBE03B_Inputs; stA8_Out : ST_IBE03B_Outputs;
+
+    stB1_In : ST_IBE03B_Inputs; stB1_Out : ST_IBE03B_Outputs;
+    stB2_In : ST_IBE03B_Inputs; stB2_Out : ST_IBE03B_Outputs;
+    stB3_In : ST_IBE03B_Inputs; stB3_Out : ST_IBE03B_Outputs;
+    stB4_In : ST_IBE03B_Inputs; stB4_Out : ST_IBE03B_Outputs;
+	
+    // =========================================================================
+    // 2. SYSTEM CONTROLLER & FAULT AGGREGATION
+    // =========================================================================
+    fbSystemControl            : FB_SystemControl;
+    bAnyFault                  : BOOL;
+    bTandem                    : BOOL; // Active Tandem Mode Flag
+
+    // =========================================================================
+    // 3. ZPA ZONE FUNCTION BLOCKS (18 Total Zones)
+    // =========================================================================
+    // Conveyor A Zones (12 Zones across 4 Conveyor Sections)
+    fbZoneA1                   : FB_ZPA_Zone;
+    fbZoneA2                   : FB_ZPA_Zone;
+    fbZoneA3                   : FB_ZPA_Zone;
+    fbZoneA4                   : FB_ZPA_Zone;
+    fbZoneA5                   : FB_ZPA_Zone;
+    fbZoneA6                   : FB_ZPA_Zone;
+    fbZoneA7                   : FB_ZPA_Zone;
+    fbZoneA8                   : FB_ZPA_Zone;
+    fbZoneA9                   : FB_ZPA_Zone;
+    fbZoneA10                  : FB_ZPA_Zone;
+    fbZoneA11                  : FB_ZPA_Zone;
+    fbZoneA12                  : FB_ZPA_Zone;
+
+    // Conveyor B Zones (6 Zones across 2 Conveyor Sections)
+    fbZoneB1                   : FB_ZPA_Zone;
+    fbZoneB2                   : FB_ZPA_Zone;
+    fbZoneB3                   : FB_ZPA_Zone;
+    fbZoneB4                   : FB_ZPA_Zone;
+    fbZoneB5                   : FB_ZPA_Zone;
+    fbZoneB6                   : FB_ZPA_Zone;
+	
+	bInfeedLatchedA1 		   : BOOL; // Latches Machine X transfer signal until Zone A1 sensor is reached
+    bInfeedLatchedB1 		   : BOOL; // Latches Gravity Roller Y pull signal until Zone B1 sensor is reached
+	
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[
+
+
+
+// =========================================================================
+
+// STEP 1: FAULT AGGREGATION & MASTER SYSTEM CONTROL
+
+// =========================================================================
+
+bAnyFault := fbZoneA1.bJamFault  OR fbZoneA2.bJamFault  OR fbZoneA3.bJamFault  OR
+
+             fbZoneA4.bJamFault  OR fbZoneA5.bJamFault  OR fbZoneA6.bJamFault  OR
+
+             fbZoneA7.bJamFault  OR fbZoneA8.bJamFault  OR fbZoneA9.bJamFault  OR
+
+             fbZoneA10.bJamFault OR fbZoneA11.bJamFault OR fbZoneA12.bJamFault OR
+
+             fbZoneB1.bJamFault  OR fbZoneB2.bJamFault  OR fbZoneB3.bJamFault  OR
+
+             fbZoneB4.bJamFault  OR fbZoneB5.bJamFault  OR fbZoneB6.bJamFault  OR
+
+             stA1_In.bErrMotorA_Stalled OR stA1_In.bErrMotorB_Stalled OR
+
+             stA2_In.bErrMotorA_Stalled OR stA3_In.bErrMotorA_Stalled OR
+
+             stA3_In.bErrMotorB_Stalled OR stA4_In.bErrMotorA_Stalled OR
+
+             stA5_In.bErrMotorA_Stalled OR stA5_In.bErrMotorB_Stalled OR
+
+             stA6_In.bErrMotorA_Stalled OR stA7_In.bErrMotorA_Stalled OR
+
+             stA7_In.bErrMotorB_Stalled OR stA8_In.bErrMotorA_Stalled OR
+
+             stB1_In.bErrMotorA_Stalled OR stB1_In.bErrMotorB_Stalled OR
+
+             stB2_In.bErrMotorA_Stalled OR stB3_In.bErrMotorA_Stalled OR
+
+             stB3_In.bErrMotorB_Stalled OR stB4_In.bErrMotorA_Stalled;
+
+
+
+fbSystemControl(
+
+    bStartBtn     := stControlPanel_In.bStartBtn,
+
+    bStopBtn      := NOT stControlPanel_In.bStopBtn,
+
+    bTandemSwitch := stControlPanel_In.bTandemSwitch,
+
+    bAnyZoneFault := bAnyFault
+
+);
+
+
+
+stControlPanel_Out.bStartLED := fbSystemControl.bStartLED;
+
+stControlPanel_Out.bStopLED  := fbSystemControl.bStopLED;
+
+bTandem                     := fbSystemControl.bTandemModeActive;
+
+// =========================================================================
+// INFEED LATCHING LOGIC (Holds arrival high for small boxes)
+// =========================================================================
+
+// --- Conveyor A Infeed Latch ---
+// Set latch when external infeed sensor is tripped
+IF stA1_In.bRemoteIn1 THEN
+    bInfeedLatchedA1 := TRUE;
+// Reset latch once box reaches Zone A1's photo-eye or system is disabled
+ELSIF stA1_In.bSensorA OR fbZoneA1.bOccupied OR NOT fbSystemControl.bSystemEnable THEN
+    bInfeedLatchedA1 := FALSE;
+END_IF;
+
+
+// =========================================================================
+// STEP 2: CONVEYOR A ZPA CHAIN (12 ZONES)
+// =========================================================================
+
+// --- ZONE A1 (Module A1, Motor A) ---
+fbZoneA1(
+    bEnable             := fbSystemControl.bSystemEnable,
+    bReset              := fbSystemControl.bResetFaults,
+    bTandemMode         := bTandem,
+    bIsTandemSlave      := FALSE,
+    bPE                 := stA1_In.bSensorA,
+    bUpstreamArrival    := bInfeedLatchedA1, // <--- Uses latched infeed signal
+    bDownstreamOccupied := SEL(bTandem, fbZoneA2.bOccupied, fbZoneA3.bOccupied),
+    bDownstreamReady    := SEL(bTandem, fbZoneA2.bReadyToReceive, fbZoneA3.bReadyToReceive),
+    bTandemSlavePE      := stA2_In.bSensorA
+);
+
+// --- ZONE A2 (Module A2, Motor A) ---
+fbZoneA2(
+    bEnable             := fbSystemControl.bSystemEnable,
+    bTandemMode         := bTandem,
+    bIsTandemSlave      := TRUE,
+    bPE                 := stA2_In.bSensorA,
+    bUpstreamArrival    := fbZoneA1.bOccupied,
+    bDownstreamOccupied := fbZoneA3.bOccupied,
+    bDownstreamReady    := fbZoneA3.bReadyToReceive,
+    bTandemMasterRun    := fbZoneA1.bRunMotor,
+	bReset := fbSystemControl.bResetFaults
+);
+
+// --- ZONE A3 (Module A2, Motor B) ---
+fbZoneA3(
+    bEnable             := fbSystemControl.bSystemEnable,
+    bTandemMode         := bTandem,
+    bIsTandemSlave      := FALSE,
+    bPE                 := stA2_In.bSensorB,
+    bUpstreamArrival    := fbZoneA2.bOccupied,
+    bDownstreamOccupied := SEL(bTandem, fbZoneA4.bOccupied, fbZoneA5.bOccupied),
+    bDownstreamReady    := SEL(bTandem, fbZoneA4.bReadyToReceive, fbZoneA5.bReadyToReceive),
+    bTandemSlavePE      := stA3_In.bSensorA,
+	bReset := fbSystemControl.bResetFaults
+);
+
+// --- ZONE A4 (Module A3, Motor A) ---
+fbZoneA4(
+    bEnable             := fbSystemControl.bSystemEnable,
+    bTandemMode         := bTandem,
+    bIsTandemSlave      := TRUE,
+    bPE                 := stA3_In.bSensorA,
+    bUpstreamArrival    := fbZoneA3.bOccupied,
+    bDownstreamOccupied := fbZoneA5.bOccupied,
+    bDownstreamReady    := fbZoneA5.bReadyToReceive,
+    bTandemMasterRun    := fbZoneA3.bRunMotor,
+	bReset := fbSystemControl.bResetFaults
+);
+
+// --- ZONE A5 (Module A4, Motor A) ---
+fbZoneA5(
+    bEnable             := fbSystemControl.bSystemEnable,
+    bTandemMode         := bTandem,
+    bIsTandemSlave      := FALSE,
+    bPE                 := stA4_In.bSensorA,
+    bUpstreamArrival    := fbZoneA4.bOccupied,
+    bDownstreamOccupied := SEL(bTandem, fbZoneA6.bOccupied, fbZoneA7.bOccupied),
+    bDownstreamReady    := SEL(bTandem, fbZoneA6.bReadyToReceive, fbZoneA7.bReadyToReceive),
+    bTandemSlavePE      := stA4_In.bSensorB,
+	bReset := fbSystemControl.bResetFaults
+);
+
+// --- ZONE A6 (Module A4, Motor B) ---
+fbZoneA6(
+    bEnable             := fbSystemControl.bSystemEnable,
+    bTandemMode         := bTandem,
+    bIsTandemSlave      := TRUE,
+    bPE                 := stA4_In.bSensorB,
+    bUpstreamArrival    := fbZoneA5.bOccupied,
+    bDownstreamOccupied := fbZoneA7.bOccupied,
+    bDownstreamReady    := fbZoneA7.bReadyToReceive,
+    bTandemMasterRun    := fbZoneA5.bRunMotor,
+	bReset := fbSystemControl.bResetFaults
+);
+
+// --- ZONE A7 (Module A5, Motor A) ---
+fbZoneA7(
+    bEnable             := fbSystemControl.bSystemEnable,
+    bTandemMode         := bTandem,
+    bIsTandemSlave      := FALSE,
+    bPE                 := stA5_In.bSensorA,
+    bUpstreamArrival    := fbZoneA6.bOccupied,
+    bDownstreamOccupied := SEL(bTandem, fbZoneA8.bOccupied, fbZoneA9.bOccupied),
+    bDownstreamReady    := SEL(bTandem, fbZoneA8.bReadyToReceive, fbZoneA9.bReadyToReceive),
+    bTandemSlavePE      := stA6_In.bSensorA,
+	bReset := fbSystemControl.bResetFaults
+);
+
+// --- ZONE A8 (Module A6, Motor A) ---
+fbZoneA8(
+    bEnable             := fbSystemControl.bSystemEnable,
+    bTandemMode         := bTandem,
+    bIsTandemSlave      := TRUE,
+    bPE                 := stA6_In.bSensorA,
+    bUpstreamArrival    := fbZoneA7.bOccupied,
+    bDownstreamOccupied := fbZoneA9.bOccupied,
+    bDownstreamReady    := fbZoneA9.bReadyToReceive,
+    bTandemMasterRun    := fbZoneA7.bRunMotor
+);
+
+// --- ZONE A9 (Module A6, Motor B) ---
+fbZoneA9(
+    bEnable             := fbSystemControl.bSystemEnable,
+    bTandemMode         := bTandem,
+    bIsTandemSlave      := FALSE,
+    bPE                 := stA6_In.bSensorB,
+    bUpstreamArrival    := fbZoneA8.bOccupied,
+    bDownstreamOccupied := SEL(bTandem, fbZoneA10.bOccupied, fbZoneA11.bOccupied),
+    bDownstreamReady    := SEL(bTandem, fbZoneA10.bReadyToReceive, fbZoneA11.bReadyToReceive),
+    bTandemSlavePE      := stA7_In.bSensorA,
+	bReset := fbSystemControl.bResetFaults
+);
+
+// --- ZONE A10 (Module A7, Motor A) ---
+fbZoneA10(
+    bEnable             := fbSystemControl.bSystemEnable,
+    bTandemMode         := bTandem,
+    bIsTandemSlave      := TRUE,
+    bPE                 := stA7_In.bSensorA,
+    bUpstreamArrival    := fbZoneA9.bOccupied,
+    bDownstreamOccupied := fbZoneA11.bOccupied,
+    bDownstreamReady    := fbZoneA11.bReadyToReceive,
+    bTandemMasterRun    := fbZoneA9.bRunMotor,
+	bReset := fbSystemControl.bResetFaults
+);
+
+// --- ZONE A11 (Module A8, Motor A) ---
+fbZoneA11(
+    bEnable             := fbSystemControl.bSystemEnable,
+    bTandemMode         := bTandem,
+    bIsTandemSlave      := FALSE,
+    bPE                 := stA8_In.bSensorA,
+    bUpstreamArrival    := fbZoneA10.bOccupied,
+    bDownstreamOccupied := SEL(bTandem, fbZoneA12.bOccupied, TRUE),                           // In Tandem Mode, EOL is occupied
+    bDownstreamReady    := SEL(bTandem, fbZoneA12.bReadyToReceive, stControlPanel_In.bFootswitch1), // In Tandem Mode, wait for footswitch
+    bTandemSlavePE      := stA8_In.bSensorB
+);
+
+// --- ZONE A12 (Module A8, Motor B) --- Discharge Zone
+fbZoneA12(
+    bEnable             := fbSystemControl.bSystemEnable,
+    bTandemMode         := bTandem,
+    bIsTandemSlave      := SEL(bTandem, FALSE, TRUE),
+    bPE                 := stA8_In.bSensorB,
+    bJogOverride        := stControlPanel_In.bFootswitch1,
+    bUpstreamArrival    := fbZoneA11.bOccupied,
+    bDownstreamOccupied := TRUE,
+    bDownstreamReady    := stControlPanel_In.bFootswitch1,
+    bTandemMasterRun    := fbZoneA11.bRunMotor,
+    tStopDelay          := T#0S,
+	bReset := fbSystemControl.bResetFaults
+);
+
+// =========================================================================
+// STEP 3: CONVEYOR B ZPA CHAIN (6 ZONES)
+// =========================================================================
+
+// --- ZONE B1 (Module B1, Motor A) --- Infeed from Gravity Roller Y
+fbZoneB1(
+    bEnable             := fbSystemControl.bSystemEnable,
+    bTandemMode         := bTandem,
+    bIsTandemSlave      := FALSE,
+    bPE                 := stB1_In.bSensorA,
+    bJogOverride        := stControlPanel_In.bFootswitch2, // Pulls from Gravity Roller Y
+    bUpstreamArrival    := stControlPanel_In.bFootswitch2,
+    bDownstreamOccupied := SEL(bTandem, fbZoneB2.bOccupied, fbZoneB3.bOccupied),
+    bDownstreamReady    := SEL(bTandem, fbZoneB2.bReadyToReceive, fbZoneB3.bReadyToReceive),
+    bTandemSlavePE      := stB2_In.bSensorA,
+	bReset := fbSystemControl.bResetFaults
+);
+
+// --- ZONE B2 (Module B2, Motor B) ---
+fbZoneB2(
+    bEnable             := fbSystemControl.bSystemEnable,
+    bTandemMode         := bTandem,
+    bIsTandemSlave      := TRUE,
+    bPE                 := stB2_In.bSensorA,
+    bUpstreamArrival    := fbZoneB1.bOccupied,
+    bDownstreamOccupied := fbZoneB3.bOccupied,
+    bDownstreamReady    := fbZoneB3.bReadyToReceive,
+    bTandemMasterRun    := fbZoneB1.bRunMotor,
+	bReset := fbSystemControl.bResetFaults
+);
+
+// --- ZONE B3 (Module B2, Motor A) ---
+fbZoneB3(
+    bEnable             := fbSystemControl.bSystemEnable,
+    bTandemMode         := bTandem,
+    bIsTandemSlave      := FALSE,
+    bPE                 := stB2_In.bSensorB,
+    bUpstreamArrival    := fbZoneB2.bOccupied,
+    bDownstreamOccupied := SEL(bTandem, fbZoneB4.bOccupied, fbZoneB5.bOccupied),
+    bDownstreamReady    := SEL(bTandem, fbZoneB4.bReadyToReceive, fbZoneB5.bReadyToReceive),
+    bTandemSlavePE      := stB3_In.bSensorA,
+	bReset := fbSystemControl.bResetFaults
+);
+
+// --- ZONE B4 (Module B3, Motor A) ---
+fbZoneB4(
+    bEnable             := fbSystemControl.bSystemEnable,
+    bTandemMode         := bTandem,
+    bIsTandemSlave      := TRUE,
+    bPE                 := stB3_In.bSensorA,
+    bUpstreamArrival    := fbZoneB3.bOccupied,
+    bDownstreamOccupied := fbZoneB5.bOccupied,
+    bDownstreamReady    := fbZoneB5.bReadyToReceive,
+    bTandemMasterRun    := fbZoneB3.bRunMotor,
+	bReset := fbSystemControl.bResetFaults
+);
+// --- ZONE B5 (Module B4, Motor B) ---
+fbZoneB5(
+    bEnable             := fbSystemControl.bSystemEnable,
+    bTandemMode         := bTandem,
+    bIsTandemSlave      := FALSE,
+    bPE                 := stB4_In.bSensorA,
+    bUpstreamArrival    := fbZoneB4.bOccupied,
+    bDownstreamOccupied := SEL(bTandem, fbZoneB6.bOccupied, TRUE),                           // In Tandem Mode, EOL B is occupied
+    bDownstreamReady    := SEL(bTandem, fbZoneB6.bReadyToReceive, stControlPanel_In.bFootswitch2), // In Tandem Mode, wait for footswitch 2
+    bTandemSlavePE      := stB4_In.bSensorB,
+	bReset := fbSystemControl.bResetFaults
+);
+
+// --- ZONE B6 (Module B4, Motor A) --- End of Line B Discharge Zone
+fbZoneB6(
+    bEnable             := fbSystemControl.bSystemEnable,
+    bTandemMode         := bTandem,
+    bIsTandemSlave      := SEL(bTandem, FALSE, TRUE),
+    bPE                 := stB4_In.bSensorB,
+    bJogOverride        := stB4_In.bRemoteIn1,
+    bUpstreamArrival    := fbZoneB5.bOccupied,
+    bDownstreamOccupied := TRUE,
+    bDownstreamReady    := stB4_In.bRemoteIn1,
+    bTandemMasterRun    := fbZoneB5.bRunMotor,
+    tStopDelay          := T#0S,
+	bReset := fbSystemControl.bResetFaults
+);
+
+// =========================================================================
+// STEP 4: HARDWARE MOTOR OUTPUT MAP
+// =========================================================================
+
+// Module A1 (1 Motor: Zone A1)
+stA1_Out.bRunMotorA := fbZoneA1.bRunMotor;
+
+// Module A2 (2 Motors: Motor A = Zone A3, Motor B = Zone A2)
+stA2_Out.bRunMotorA := fbZoneA3.bRunMotor;
+stA2_Out.bRunMotorB := fbZoneA2.bRunMotor;
+
+// Module A3 (1 Motor: Zone A4)
+stA3_Out.bRunMotorA := fbZoneA4.bRunMotor;
+
+// Module A4 (2 Motors: Motor A = Zone A6, Motor B = Zone A5)
+stA4_Out.bRunMotorA := fbZoneA6.bRunMotor;
+stA4_Out.bRunMotorB := fbZoneA5.bRunMotor;
+
+// Module A5 (1 Motor: Zone A7)
+stA5_Out.bRunMotorA := fbZoneA7.bRunMotor;
+
+// Module A6 (2 Motors: Motor A = Zone A9, Motor B = Zone A8)
+stA6_Out.bRunMotorA := fbZoneA9.bRunMotor;
+stA6_Out.bRunMotorB := fbZoneA8.bRunMotor;
+
+// Module A7 (1 Motor: Zone A10)
+stA7_Out.bRunMotorA := fbZoneA10.bRunMotor;
+
+// Module A8 (2 Motors: Motor A = Zone A12, Motor B = Zone A11)
+stA8_Out.bRunMotorA := fbZoneA12.bRunMotor;
+stA8_Out.bRunMotorB := fbZoneA11.bRunMotor;
+
+// -------------------------------------------------------------------------
+// Conveyor B Output Mapping
+// -------------------------------------------------------------------------
+
+// Module B1 (1 Motor: Zone B1)
+stB1_Out.bRunMotorA := fbZoneB1.bRunMotor;
+
+// Module B2 (2 Motors: Motor A = Zone B3, Motor B = Zone B2)
+stB2_Out.bRunMotorA := fbZoneB3.bRunMotor;
+stB2_Out.bRunMotorB := fbZoneB2.bRunMotor;
+
+// Module B3 (1 Motor: Zone B4)
+stB3_Out.bRunMotorA := fbZoneB4.bRunMotor;
+
+// Module B4 (2 Motors: Motor A = Zone B6, Motor B = Zone B5)
+stB4_Out.bRunMotorA := fbZoneB6.bRunMotor;
+stB4_Out.bRunMotorB := fbZoneB5.bRunMotor;
+
+ACT_MapIO();]]></ST>
+    </Implementation>
+    <Action Name="ACT_MapIO" Id="{c9d901b9-7f5e-4159-95dd-6f673401d37d}">
+      <Implementation>
+        <ST><![CDATA[// =========================================================================
+// CONVEYOR A - MODULE A1
+// =========================================================================
+// Inputs
+stA1_In.bSensorA             := stA1_InBytes[4].0;
+stA1_In.bSensorB             := stA1_InBytes[4].1;
+stA1_In.bSensorAlarmA        := stA1_InBytes[4].2;
+stA1_In.bSensorAlarmB        := stA1_InBytes[4].3;
+stA1_In.bMotorARunning       := stA1_InBytes[4].4;
+stA1_In.bMotorBRunning       := stA1_InBytes[4].5;
+
+stA1_In.bErrMotorA_BackEMF   := stA1_InBytes[5].0;
+stA1_In.bErrMotorA_Current   := stA1_InBytes[5].1;
+stA1_In.bErrMotorA_Thermal   := stA1_InBytes[5].2;
+stA1_In.bErrDriverA_Thermal  := stA1_InBytes[5].3;
+stA1_In.bErrMotorA_Stalled   := stA1_InBytes[5].4;
+stA1_In.bErrMotorA_Unplugged := stA1_InBytes[5].5;
+stA1_In.bErrMotorA_Jam       := stA1_InBytes[5].6;
+stA1_In.bErrMotorA_Sensor    := stA1_InBytes[5].7;
+
+stA1_In.bErrMotorB_BackEMF   := stA1_InBytes[6].0;
+stA1_In.bErrMotorB_Current   := stA1_InBytes[6].1;
+stA1_In.bErrMotorB_Thermal   := stA1_InBytes[6].2;
+stA1_In.bErrDriverB_Thermal  := stA1_InBytes[6].3;
+stA1_In.bErrMotorB_Stalled   := stA1_InBytes[6].4;
+stA1_In.bErrMotorB_Unplugged := stA1_InBytes[6].5;
+stA1_In.bErrMotorB_Jam       := stA1_InBytes[6].6;
+stA1_In.bErrMotorB_Sensor    := stA1_InBytes[6].7;
+
+stA1_In.bRemoteIn1           := stA1_InBytes[7].0;
+stA1_In.bRemoteIn2           := stA1_InBytes[7].1;
+stA1_In.bRemoteIn3           := stA1_InBytes[7].2;
+
+
+
+// Outputs
+stA1_OutBytes[0].0 := stA1_Out.bRunMotorA;
+stA1_OutBytes[0].1 := stA1_Out.bRunMotorB;
+
+stA1_OutBytes[1].0 := stA1_Out.bSpeed1_MotorA;
+stA1_OutBytes[1].1 := stA1_Out.bSpeed2_MotorA;
+stA1_OutBytes[1].2 := stA1_Out.bSpeed3_MotorA;
+stA1_OutBytes[1].3 := stA1_Out.bSpeed4_MotorA;
+stA1_OutBytes[1].4 := stA1_Out.bSpeed1_MotorB;
+stA1_OutBytes[1].5 := stA1_Out.bSpeed2_MotorB;
+stA1_OutBytes[1].6 := stA1_Out.bSpeed3_MotorB;
+stA1_OutBytes[1].7 := stA1_Out.bSpeed4_MotorB;
+
+stA1_OutBytes[2].0 := stA1_Out.bDisableAccelMotorA;
+stA1_OutBytes[2].1 := stA1_Out.bDisableAccelMotorB;
+stA1_OutBytes[2].2 := stA1_Out.bDisableDecelMotorA;
+stA1_OutBytes[2].3 := stA1_Out.bDisableDecelMotorB;
+stA1_OutBytes[2].4 := stA1_Out.bReverseMotorA;
+stA1_OutBytes[2].5 := stA1_Out.bReverseMotorB;
+stA1_OutBytes[2].6 := stA1_Out.bResetErrMotorA;
+stA1_OutBytes[2].7 := stA1_Out.bResetErrMotorB;
+
+stA1_OutBytes[3].0 := stA1_Out.bRemoteOut1;
+stA1_OutBytes[3].1 := stA1_Out.bRemoteOut2;
+stA1_OutBytes[3].2 := stA1_Out.bRemoteOut3;
+stA1_OutBytes[3].3 := stA1_Out.bRemoteOut4;
+stA1_OutBytes[3].4 := stA1_Out.bRemoteOut5;
+
+
+// =========================================================================
+// CONVEYOR A - MODULE A2
+// =========================================================================
+stA2_In.bSensorA             := stA2_InBytes[4].0;
+stA2_In.bSensorB             := stA2_InBytes[4].1;
+stA2_In.bSensorAlarmA        := stA2_InBytes[4].2;
+stA2_In.bSensorAlarmB        := stA2_InBytes[4].3;
+stA2_In.bMotorARunning       := stA2_InBytes[4].4;
+stA2_In.bMotorBRunning       := stA2_InBytes[4].5;
+
+stA2_In.bErrMotorA_BackEMF   := stA2_InBytes[5].0;
+stA2_In.bErrMotorA_Current   := stA2_InBytes[5].1;
+stA2_In.bErrMotorA_Thermal   := stA2_InBytes[5].2;
+stA2_In.bErrDriverA_Thermal  := stA2_InBytes[5].3;
+stA2_In.bErrMotorA_Stalled   := stA2_InBytes[5].4;
+stA2_In.bErrMotorA_Unplugged := stA2_InBytes[5].5;
+stA2_In.bErrMotorA_Jam       := stA2_InBytes[5].6;
+stA2_In.bErrMotorA_Sensor    := stA2_InBytes[5].7;
+
+stA2_In.bErrMotorB_BackEMF   := stA2_InBytes[6].0;
+stA2_In.bErrMotorB_Current   := stA2_InBytes[6].1;
+stA2_In.bErrMotorB_Thermal   := stA2_InBytes[6].2;
+stA2_In.bErrDriverB_Thermal  := stA2_InBytes[6].3;
+stA2_In.bErrMotorB_Stalled   := stA2_InBytes[6].4;
+stA2_In.bErrMotorB_Unplugged := stA2_InBytes[6].5;
+stA2_In.bErrMotorB_Jam       := stA2_InBytes[6].6;
+stA2_In.bErrMotorB_Sensor    := stA2_InBytes[6].7;
+
+stA2_In.bRemoteIn1           := stA2_InBytes[7].0;
+stA2_In.bRemoteIn2           := stA2_InBytes[7].1;
+stA2_In.bRemoteIn3           := stA2_InBytes[7].2;
+
+
+
+stA2_OutBytes[0].0 := stA2_Out.bRunMotorA;
+stA2_OutBytes[0].1 := stA2_Out.bRunMotorB;
+
+stA2_OutBytes[1].0 := stA2_Out.bSpeed1_MotorA;
+stA2_OutBytes[1].1 := stA2_Out.bSpeed2_MotorA;
+stA2_OutBytes[1].2 := stA2_Out.bSpeed3_MotorA;
+stA2_OutBytes[1].3 := stA2_Out.bSpeed4_MotorA;
+stA2_OutBytes[1].4 := stA2_Out.bSpeed1_MotorB;
+stA2_OutBytes[1].5 := stA2_Out.bSpeed2_MotorB;
+stA2_OutBytes[1].6 := stA2_Out.bSpeed3_MotorB;
+stA2_OutBytes[1].7 := stA2_Out.bSpeed4_MotorB;
+
+stA2_OutBytes[2].0 := stA2_Out.bDisableAccelMotorA;
+stA2_OutBytes[2].1 := stA2_Out.bDisableAccelMotorB;
+stA2_OutBytes[2].2 := stA2_Out.bDisableDecelMotorA;
+stA2_OutBytes[2].3 := stA2_Out.bDisableDecelMotorB;
+stA2_OutBytes[2].4 := stA2_Out.bReverseMotorA;
+stA2_OutBytes[2].5 := stA2_Out.bReverseMotorB;
+stA2_OutBytes[2].6 := stA2_Out.bResetErrMotorA;
+stA2_OutBytes[2].7 := stA2_Out.bResetErrMotorB;
+
+stA2_OutBytes[3].0 := stA2_Out.bRemoteOut1;
+stA2_OutBytes[3].1 := stA2_Out.bRemoteOut2;
+stA2_OutBytes[3].2 := stA2_Out.bRemoteOut3;
+stA2_OutBytes[3].3 := stA2_Out.bRemoteOut4;
+stA2_OutBytes[3].4 := stA2_Out.bRemoteOut5;
+
+
+// =========================================================================
+// CONVEYOR A - MODULE A3
+// =========================================================================
+stA3_In.bSensorA             := stA3_InBytes[4].0;
+stA3_In.bSensorB             := stA3_InBytes[4].1;
+stA3_In.bSensorAlarmA        := stA3_InBytes[4].2;
+stA3_In.bSensorAlarmB        := stA3_InBytes[4].3;
+stA3_In.bMotorARunning       := stA3_InBytes[4].4;
+stA3_In.bMotorBRunning       := stA3_InBytes[4].5;
+
+stA3_In.bErrMotorA_BackEMF   := stA3_InBytes[5].0;
+stA3_In.bErrMotorA_Current   := stA3_InBytes[5].1;
+stA3_In.bErrMotorA_Thermal   := stA3_InBytes[5].2;
+stA3_In.bErrDriverA_Thermal  := stA3_InBytes[5].3;
+stA3_In.bErrMotorA_Stalled   := stA3_InBytes[5].4;
+stA3_In.bErrMotorA_Unplugged := stA3_InBytes[5].5;
+stA3_In.bErrMotorA_Jam       := stA3_InBytes[5].6;
+stA3_In.bErrMotorA_Sensor    := stA3_InBytes[5].7;
+
+stA3_In.bErrMotorB_BackEMF   := stA3_InBytes[6].0;
+stA3_In.bErrMotorB_Current   := stA3_InBytes[6].1;
+stA3_In.bErrMotorB_Thermal   := stA3_InBytes[6].2;
+stA3_In.bErrDriverB_Thermal  := stA3_InBytes[6].3;
+stA3_In.bErrMotorB_Stalled   := stA3_InBytes[6].4;
+stA3_In.bErrMotorB_Unplugged := stA3_InBytes[6].5;
+stA3_In.bErrMotorB_Jam       := stA3_InBytes[6].6;
+stA3_In.bErrMotorB_Sensor    := stA3_InBytes[6].7;
+
+stA3_In.bRemoteIn1           := stA3_InBytes[7].0;
+stA3_In.bRemoteIn2           := stA3_InBytes[7].1;
+stA3_In.bRemoteIn3           := stA3_InBytes[7].2;
+
+
+stA3_OutBytes[0].0 := stA3_Out.bRunMotorA;
+stA3_OutBytes[0].1 := stA3_Out.bRunMotorB;
+
+stA3_OutBytes[1].0 := stA3_Out.bSpeed1_MotorA;
+stA3_OutBytes[1].1 := stA3_Out.bSpeed2_MotorA;
+stA3_OutBytes[1].2 := stA3_Out.bSpeed3_MotorA;
+stA3_OutBytes[1].3 := stA3_Out.bSpeed4_MotorA;
+stA3_OutBytes[1].4 := stA3_Out.bSpeed1_MotorB;
+stA3_OutBytes[1].5 := stA3_Out.bSpeed2_MotorB;
+stA3_OutBytes[1].6 := stA3_Out.bSpeed3_MotorB;
+stA3_OutBytes[1].7 := stA3_Out.bSpeed4_MotorB;
+
+stA3_OutBytes[2].0 := stA3_Out.bDisableAccelMotorA;
+stA3_OutBytes[2].1 := stA3_Out.bDisableAccelMotorB;
+stA3_OutBytes[2].2 := stA3_Out.bDisableDecelMotorA;
+stA3_OutBytes[2].3 := stA3_Out.bDisableDecelMotorB;
+stA3_OutBytes[2].4 := stA3_Out.bReverseMotorA;
+stA3_OutBytes[2].5 := stA3_Out.bReverseMotorB;
+stA3_OutBytes[2].6 := stA3_Out.bResetErrMotorA;
+stA3_OutBytes[2].7 := stA3_Out.bResetErrMotorB;
+
+stA3_OutBytes[3].0 := stA3_Out.bRemoteOut1;
+stA3_OutBytes[3].1 := stA3_Out.bRemoteOut2;
+stA3_OutBytes[3].2 := stA3_Out.bRemoteOut3;
+stA3_OutBytes[3].3 := stA3_Out.bRemoteOut4;
+stA3_OutBytes[3].4 := stA3_Out.bRemoteOut5;
+
+
+// =========================================================================
+// CONVEYOR A - MODULE A4
+// =========================================================================
+stA4_In.bSensorA             := stA4_InBytes[4].0;
+stA4_In.bSensorB             := stA4_InBytes[4].1;
+stA4_In.bSensorAlarmA        := stA4_InBytes[4].2;
+stA4_In.bSensorAlarmB        := stA4_InBytes[4].3;
+stA4_In.bMotorARunning       := stA4_InBytes[4].4;
+stA4_In.bMotorBRunning       := stA4_InBytes[4].5;
+
+stA4_In.bErrMotorA_BackEMF   := stA4_InBytes[5].0;
+stA4_In.bErrMotorA_Current   := stA4_InBytes[5].1;
+stA4_In.bErrMotorA_Thermal   := stA4_InBytes[5].2;
+stA4_In.bErrDriverA_Thermal  := stA4_InBytes[5].3;
+stA4_In.bErrMotorA_Stalled   := stA4_InBytes[5].4;
+stA4_In.bErrMotorA_Unplugged := stA4_InBytes[5].5;
+stA4_In.bErrMotorA_Jam       := stA4_InBytes[5].6;
+stA4_In.bErrMotorA_Sensor    := stA4_InBytes[5].7;
+
+stA4_In.bErrMotorB_BackEMF   := stA4_InBytes[6].0;
+stA4_In.bErrMotorB_Current   := stA4_InBytes[6].1;
+stA4_In.bErrMotorB_Thermal   := stA4_InBytes[6].2;
+stA4_In.bErrDriverB_Thermal  := stA4_InBytes[6].3;
+stA4_In.bErrMotorB_Stalled   := stA4_InBytes[6].4;
+stA4_In.bErrMotorB_Unplugged := stA4_InBytes[6].5;
+stA4_In.bErrMotorB_Jam       := stA4_InBytes[6].6;
+stA4_In.bErrMotorB_Sensor    := stA4_InBytes[6].7;
+
+stA4_In.bRemoteIn1           := stA4_InBytes[7].0;
+stA4_In.bRemoteIn2           := stA4_InBytes[7].1;
+stA4_In.bRemoteIn3           := stA4_InBytes[7].2;
+
+
+
+stA4_OutBytes[0].0 := stA4_Out.bRunMotorA;
+stA4_OutBytes[0].1 := stA4_Out.bRunMotorB;
+
+stA4_OutBytes[1].0 := stA4_Out.bSpeed1_MotorA;
+stA4_OutBytes[1].1 := stA4_Out.bSpeed2_MotorA;
+stA4_OutBytes[1].2 := stA4_Out.bSpeed3_MotorA;
+stA4_OutBytes[1].3 := stA4_Out.bSpeed4_MotorA;
+stA4_OutBytes[1].4 := stA4_Out.bSpeed1_MotorB;
+stA4_OutBytes[1].5 := stA4_Out.bSpeed2_MotorB;
+stA4_OutBytes[1].6 := stA4_Out.bSpeed3_MotorB;
+stA4_OutBytes[1].7 := stA4_Out.bSpeed4_MotorB;
+
+stA4_OutBytes[2].0 := stA4_Out.bDisableAccelMotorA;
+stA4_OutBytes[2].1 := stA4_Out.bDisableAccelMotorB;
+stA4_OutBytes[2].2 := stA4_Out.bDisableDecelMotorA;
+stA4_OutBytes[2].3 := stA4_Out.bDisableDecelMotorB;
+stA4_OutBytes[2].4 := stA4_Out.bReverseMotorA;
+stA4_OutBytes[2].5 := stA4_Out.bReverseMotorB;
+stA4_OutBytes[2].6 := stA4_Out.bResetErrMotorA;
+stA4_OutBytes[2].7 := stA4_Out.bResetErrMotorB;
+
+stA4_OutBytes[3].0 := stA4_Out.bRemoteOut1;
+stA4_OutBytes[3].1 := stA4_Out.bRemoteOut2;
+stA4_OutBytes[3].2 := stA4_Out.bRemoteOut3;
+stA4_OutBytes[3].3 := stA4_Out.bRemoteOut4;
+stA4_OutBytes[3].4 := stA4_Out.bRemoteOut5;
+
+
+// =========================================================================
+// CONVEYOR A - MODULE A5
+// =========================================================================
+stA5_In.bSensorA             := stA5_InBytes[4].0;
+stA5_In.bSensorB             := stA5_InBytes[4].1;
+stA5_In.bSensorAlarmA        := stA5_InBytes[4].2;
+stA5_In.bSensorAlarmB        := stA5_InBytes[4].3;
+stA5_In.bMotorARunning       := stA5_InBytes[4].4;
+stA5_In.bMotorBRunning       := stA5_InBytes[4].5;
+
+stA5_In.bErrMotorA_BackEMF   := stA5_InBytes[5].0;
+stA5_In.bErrMotorA_Current   := stA5_InBytes[5].1;
+stA5_In.bErrMotorA_Thermal   := stA5_InBytes[5].2;
+stA5_In.bErrDriverA_Thermal  := stA5_InBytes[5].3;
+stA5_In.bErrMotorA_Stalled   := stA5_InBytes[5].4;
+stA5_In.bErrMotorA_Unplugged := stA5_InBytes[5].5;
+stA5_In.bErrMotorA_Jam       := stA5_InBytes[5].6;
+stA5_In.bErrMotorA_Sensor    := stA5_InBytes[5].7;
+
+stA5_In.bErrMotorB_BackEMF   := stA5_InBytes[6].0;
+stA5_In.bErrMotorB_Current   := stA5_InBytes[6].1;
+stA5_In.bErrMotorB_Thermal   := stA5_InBytes[6].2;
+stA5_In.bErrDriverB_Thermal  := stA5_InBytes[6].3;
+stA5_In.bErrMotorB_Stalled   := stA5_InBytes[6].4;
+stA5_In.bErrMotorB_Unplugged := stA5_InBytes[6].5;
+stA5_In.bErrMotorB_Jam       := stA5_InBytes[6].6;
+stA5_In.bErrMotorB_Sensor    := stA5_InBytes[6].7;
+
+stA5_In.bRemoteIn1           := stA5_InBytes[7].0;
+stA5_In.bRemoteIn2           := stA5_InBytes[7].1;
+stA5_In.bRemoteIn3           := stA5_InBytes[7].2;
+
+
+
+stA5_OutBytes[0].0 := stA5_Out.bRunMotorA;
+stA5_OutBytes[0].1 := stA5_Out.bRunMotorB;
+
+stA5_OutBytes[1].0 := stA5_Out.bSpeed1_MotorA;
+stA5_OutBytes[1].1 := stA5_Out.bSpeed2_MotorA;
+stA5_OutBytes[1].2 := stA5_Out.bSpeed3_MotorA;
+stA5_OutBytes[1].3 := stA5_Out.bSpeed4_MotorA;
+stA5_OutBytes[1].4 := stA5_Out.bSpeed1_MotorB;
+stA5_OutBytes[1].5 := stA5_Out.bSpeed2_MotorB;
+stA5_OutBytes[1].6 := stA5_Out.bSpeed3_MotorB;
+stA5_OutBytes[1].7 := stA5_Out.bSpeed4_MotorB;
+
+stA5_OutBytes[2].0 := stA5_Out.bDisableAccelMotorA;
+stA5_OutBytes[2].1 := stA5_Out.bDisableAccelMotorB;
+stA5_OutBytes[2].2 := stA5_Out.bDisableDecelMotorA;
+stA5_OutBytes[2].3 := stA5_Out.bDisableDecelMotorB;
+stA5_OutBytes[2].4 := stA5_Out.bReverseMotorA;
+stA5_OutBytes[2].5 := stA5_Out.bReverseMotorB;
+stA5_OutBytes[2].6 := stA5_Out.bResetErrMotorA;
+stA5_OutBytes[2].7 := stA5_Out.bResetErrMotorB;
+
+stA5_OutBytes[3].0 := stA5_Out.bRemoteOut1;
+stA5_OutBytes[3].1 := stA5_Out.bRemoteOut2;
+stA5_OutBytes[3].2 := stA5_Out.bRemoteOut3;
+stA5_OutBytes[3].3 := stA5_Out.bRemoteOut4;
+stA5_OutBytes[3].4 := stA5_Out.bRemoteOut5;
+
+
+// =========================================================================
+// CONVEYOR A - MODULE A6
+// =========================================================================
+stA6_In.bSensorA             := stA6_InBytes[4].0;
+stA6_In.bSensorB             := stA6_InBytes[4].1;
+stA6_In.bSensorAlarmA        := stA6_InBytes[4].2;
+stA6_In.bSensorAlarmB        := stA6_InBytes[4].3;
+stA6_In.bMotorARunning       := stA6_InBytes[4].4;
+stA6_In.bMotorBRunning       := stA6_InBytes[4].5;
+
+stA6_In.bErrMotorA_BackEMF   := stA6_InBytes[5].0;
+stA6_In.bErrMotorA_Current   := stA6_InBytes[5].1;
+stA6_In.bErrMotorA_Thermal   := stA6_InBytes[5].2;
+stA6_In.bErrDriverA_Thermal  := stA6_InBytes[5].3;
+stA6_In.bErrMotorA_Stalled   := stA6_InBytes[5].4;
+stA6_In.bErrMotorA_Unplugged := stA6_InBytes[5].5;
+stA6_In.bErrMotorA_Jam       := stA6_InBytes[5].6;
+stA6_In.bErrMotorA_Sensor    := stA6_InBytes[5].7;
+
+stA6_In.bErrMotorB_BackEMF   := stA6_InBytes[6].0;
+stA6_In.bErrMotorB_Current   := stA6_InBytes[6].1;
+stA6_In.bErrMotorB_Thermal   := stA6_InBytes[6].2;
+stA6_In.bErrDriverB_Thermal  := stA6_InBytes[6].3;
+stA6_In.bErrMotorB_Stalled   := stA6_InBytes[6].4;
+stA6_In.bErrMotorB_Unplugged := stA6_InBytes[6].5;
+stA6_In.bErrMotorB_Jam       := stA6_InBytes[6].6;
+stA6_In.bErrMotorB_Sensor    := stA6_InBytes[6].7;
+
+stA6_In.bRemoteIn1           := stA6_InBytes[7].0;
+stA6_In.bRemoteIn2           := stA6_InBytes[7].1;
+stA6_In.bRemoteIn3           := stA6_InBytes[7].2;
+
+
+
+stA6_OutBytes[0].0 := stA6_Out.bRunMotorA;
+stA6_OutBytes[0].1 := stA6_Out.bRunMotorB;
+
+stA6_OutBytes[1].0 := stA6_Out.bSpeed1_MotorA;
+stA6_OutBytes[1].1 := stA6_Out.bSpeed2_MotorA;
+stA6_OutBytes[1].2 := stA6_Out.bSpeed3_MotorA;
+stA6_OutBytes[1].3 := stA6_Out.bSpeed4_MotorA;
+stA6_OutBytes[1].4 := stA6_Out.bSpeed1_MotorB;
+stA6_OutBytes[1].5 := stA6_Out.bSpeed2_MotorB;
+stA6_OutBytes[1].6 := stA6_Out.bSpeed3_MotorB;
+stA6_OutBytes[1].7 := stA6_Out.bSpeed4_MotorB;
+
+stA6_OutBytes[2].0 := stA6_Out.bDisableAccelMotorA;
+stA6_OutBytes[2].1 := stA6_Out.bDisableAccelMotorB;
+stA6_OutBytes[2].2 := stA6_Out.bDisableDecelMotorA;
+stA6_OutBytes[2].3 := stA6_Out.bDisableDecelMotorB;
+stA6_OutBytes[2].4 := stA6_Out.bReverseMotorA;
+stA6_OutBytes[2].5 := stA6_Out.bReverseMotorB;
+stA6_OutBytes[2].6 := stA6_Out.bResetErrMotorA;
+stA6_OutBytes[2].7 := stA6_Out.bResetErrMotorB;
+
+stA6_OutBytes[3].0 := stA6_Out.bRemoteOut1;
+stA6_OutBytes[3].1 := stA6_Out.bRemoteOut2;
+stA6_OutBytes[3].2 := stA6_Out.bRemoteOut3;
+stA6_OutBytes[3].3 := stA6_Out.bRemoteOut4;
+stA6_OutBytes[3].4 := stA6_Out.bRemoteOut5;
+
+
+// =========================================================================
+// CONVEYOR A - MODULE A7
+// =========================================================================
+stA7_In.bSensorA             := stA7_InBytes[4].0;
+stA7_In.bSensorB             := stA7_InBytes[4].1;
+stA7_In.bSensorAlarmA        := stA7_InBytes[4].2;
+stA7_In.bSensorAlarmB        := stA7_InBytes[4].3;
+stA7_In.bMotorARunning       := stA7_InBytes[4].4;
+stA7_In.bMotorBRunning       := stA7_InBytes[4].5;
+
+stA7_In.bErrMotorA_BackEMF   := stA7_InBytes[5].0;
+stA7_In.bErrMotorA_Current   := stA7_InBytes[5].1;
+stA7_In.bErrMotorA_Thermal   := stA7_InBytes[5].2;
+stA7_In.bErrDriverA_Thermal  := stA7_InBytes[5].3;
+stA7_In.bErrMotorA_Stalled   := stA7_InBytes[5].4;
+stA7_In.bErrMotorA_Unplugged := stA7_InBytes[5].5;
+stA7_In.bErrMotorA_Jam       := stA7_InBytes[5].6;
+stA7_In.bErrMotorA_Sensor    := stA7_InBytes[5].7;
+
+stA7_In.bErrMotorB_BackEMF   := stA7_InBytes[6].0;
+stA7_In.bErrMotorB_Current   := stA7_InBytes[6].1;
+stA7_In.bErrMotorB_Thermal   := stA7_InBytes[6].2;
+stA7_In.bErrDriverB_Thermal  := stA7_InBytes[6].3;
+stA7_In.bErrMotorB_Stalled   := stA7_InBytes[6].4;
+stA7_In.bErrMotorB_Unplugged := stA7_InBytes[6].5;
+stA7_In.bErrMotorB_Jam       := stA7_InBytes[6].6;
+stA7_In.bErrMotorB_Sensor    := stA7_InBytes[6].7;
+
+stA7_In.bRemoteIn1           := stA7_InBytes[7].0;
+stA7_In.bRemoteIn2           := stA7_InBytes[7].1;
+stA7_In.bRemoteIn3           := stA7_InBytes[7].2;
+
+
+
+stA7_OutBytes[0].0 := stA7_Out.bRunMotorA;
+stA7_OutBytes[0].1 := stA7_Out.bRunMotorB;
+
+stA7_OutBytes[1].0 := stA7_Out.bSpeed1_MotorA;
+stA7_OutBytes[1].1 := stA7_Out.bSpeed2_MotorA;
+stA7_OutBytes[1].2 := stA7_Out.bSpeed3_MotorA;
+stA7_OutBytes[1].3 := stA7_Out.bSpeed4_MotorA;
+stA7_OutBytes[1].4 := stA7_Out.bSpeed1_MotorB;
+stA7_OutBytes[1].5 := stA7_Out.bSpeed2_MotorB;
+stA7_OutBytes[1].6 := stA7_Out.bSpeed3_MotorB;
+stA7_OutBytes[1].7 := stA7_Out.bSpeed4_MotorB;
+
+stA7_OutBytes[2].0 := stA7_Out.bDisableAccelMotorA;
+stA7_OutBytes[2].1 := stA7_Out.bDisableAccelMotorB;
+stA7_OutBytes[2].2 := stA7_Out.bDisableDecelMotorA;
+stA7_OutBytes[2].3 := stA7_Out.bDisableDecelMotorB;
+stA7_OutBytes[2].4 := stA7_Out.bReverseMotorA;
+stA7_OutBytes[2].5 := stA7_Out.bReverseMotorB;
+stA7_OutBytes[2].6 := stA7_Out.bResetErrMotorA;
+stA7_OutBytes[2].7 := stA7_Out.bResetErrMotorB;
+
+stA7_OutBytes[3].0 := stA7_Out.bRemoteOut1;
+stA7_OutBytes[3].1 := stA7_Out.bRemoteOut2;
+stA7_OutBytes[3].2 := stA7_Out.bRemoteOut3;
+stA7_OutBytes[3].3 := stA7_Out.bRemoteOut4;
+stA7_OutBytes[3].4 := stA7_Out.bRemoteOut5;
+
+
+// =========================================================================
+// CONVEYOR A - MODULE A8
+// =========================================================================
+stA8_In.bSensorA             := stA8_InBytes[4].0;
+stA8_In.bSensorB             := stA8_InBytes[4].1;
+stA8_In.bSensorAlarmA        := stA8_InBytes[4].2;
+stA8_In.bSensorAlarmB        := stA8_InBytes[4].3;
+stA8_In.bMotorARunning       := stA8_InBytes[4].4;
+stA8_In.bMotorBRunning       := stA8_InBytes[4].5;
+
+stA8_In.bErrMotorA_BackEMF   := stA8_InBytes[5].0;
+stA8_In.bErrMotorA_Current   := stA8_InBytes[5].1;
+stA8_In.bErrMotorA_Thermal   := stA8_InBytes[5].2;
+stA8_In.bErrDriverA_Thermal  := stA8_InBytes[5].3;
+stA8_In.bErrMotorA_Stalled   := stA8_InBytes[5].4;
+stA8_In.bErrMotorA_Unplugged := stA8_InBytes[5].5;
+stA8_In.bErrMotorA_Jam       := stA8_InBytes[5].6;
+stA8_In.bErrMotorA_Sensor    := stA8_InBytes[5].7;
+
+stA8_In.bErrMotorB_BackEMF   := stA8_InBytes[6].0;
+stA8_In.bErrMotorB_Current   := stA8_InBytes[6].1;
+stA8_In.bErrMotorB_Thermal   := stA8_InBytes[6].2;
+stA8_In.bErrDriverB_Thermal  := stA8_InBytes[6].3;
+stA8_In.bErrMotorB_Stalled   := stA8_InBytes[6].4;
+stA8_In.bErrMotorB_Unplugged := stA8_InBytes[6].5;
+stA8_In.bErrMotorB_Jam       := stA8_InBytes[6].6;
+stA8_In.bErrMotorB_Sensor    := stA8_InBytes[6].7;
+
+stA8_In.bRemoteIn1           := stA8_InBytes[7].0;
+stA8_In.bRemoteIn2           := stA8_InBytes[7].1;
+stA8_In.bRemoteIn3           := stA8_InBytes[7].2;
+
+
+
+stA8_OutBytes[0].0 := stA8_Out.bRunMotorA;
+stA8_OutBytes[0].1 := stA8_Out.bRunMotorB;
+
+stA8_OutBytes[1].0 := stA8_Out.bSpeed1_MotorA;
+stA8_OutBytes[1].1 := stA8_Out.bSpeed2_MotorA;
+stA8_OutBytes[1].2 := stA8_Out.bSpeed3_MotorA;
+stA8_OutBytes[1].3 := stA8_Out.bSpeed4_MotorA;
+stA8_OutBytes[1].4 := stA8_Out.bSpeed1_MotorB;
+stA8_OutBytes[1].5 := stA8_Out.bSpeed2_MotorB;
+stA8_OutBytes[1].6 := stA8_Out.bSpeed3_MotorB;
+stA8_OutBytes[1].7 := stA8_Out.bSpeed4_MotorB;
+
+stA8_OutBytes[2].0 := stA8_Out.bDisableAccelMotorA;
+stA8_OutBytes[2].1 := stA8_Out.bDisableAccelMotorB;
+stA8_OutBytes[2].2 := stA8_Out.bDisableDecelMotorA;
+stA8_OutBytes[2].3 := stA8_Out.bDisableDecelMotorB;
+stA8_OutBytes[2].4 := stA8_Out.bReverseMotorA;
+stA8_OutBytes[2].5 := stA8_Out.bReverseMotorB;
+stA8_OutBytes[2].6 := stA8_Out.bResetErrMotorA;
+stA8_OutBytes[2].7 := stA8_Out.bResetErrMotorB;
+
+stA8_OutBytes[3].0 := stA8_Out.bRemoteOut1;
+stA8_OutBytes[3].1 := stA8_Out.bRemoteOut2;
+stA8_OutBytes[3].2 := stA8_Out.bRemoteOut3;
+stA8_OutBytes[3].3 := stA8_Out.bRemoteOut4;
+stA8_OutBytes[3].4 := stA8_Out.bRemoteOut5;
+
+
+// =========================================================================
+// CONVEYOR B - MODULE B1
+// =========================================================================
+stB1_In.bSensorA             := stB1_InBytes[4].0;
+stB1_In.bSensorB             := stB1_InBytes[4].1;
+stB1_In.bSensorAlarmA        := stB1_InBytes[4].2;
+stB1_In.bSensorAlarmB        := stB1_InBytes[4].3;
+stB1_In.bMotorARunning       := stB1_InBytes[4].4;
+stB1_In.bMotorBRunning       := stB1_InBytes[4].5;
+
+stB1_In.bErrMotorA_BackEMF   := stB1_InBytes[5].0;
+stB1_In.bErrMotorA_Current   := stB1_InBytes[5].1;
+stB1_In.bErrMotorA_Thermal   := stB1_InBytes[5].2;
+stB1_In.bErrDriverA_Thermal  := stB1_InBytes[5].3;
+stB1_In.bErrMotorA_Stalled   := stB1_InBytes[5].4;
+stB1_In.bErrMotorA_Unplugged := stB1_InBytes[5].5;
+stB1_In.bErrMotorA_Jam       := stB1_InBytes[5].6;
+stB1_In.bErrMotorA_Sensor    := stB1_InBytes[5].7;
+
+stB1_In.bErrMotorB_BackEMF   := stB1_InBytes[6].0;
+stB1_In.bErrMotorB_Current   := stB1_InBytes[6].1;
+stB1_In.bErrMotorB_Thermal   := stB1_InBytes[6].2;
+stB1_In.bErrDriverB_Thermal  := stB1_InBytes[6].3;
+stB1_In.bErrMotorB_Stalled   := stB1_InBytes[6].4;
+stB1_In.bErrMotorB_Unplugged := stB1_InBytes[6].5;
+stB1_In.bErrMotorB_Jam       := stB1_InBytes[6].6;
+stB1_In.bErrMotorB_Sensor    := stB1_InBytes[6].7;
+
+stB1_In.bRemoteIn1           := stB1_InBytes[7].0;
+stB1_In.bRemoteIn2           := stB1_InBytes[7].1;
+stB1_In.bRemoteIn3           := stB1_InBytes[7].2;
+
+
+
+stB1_OutBytes[0].0 := stB1_Out.bRunMotorA;
+stB1_OutBytes[0].1 := stB1_Out.bRunMotorB;
+
+stB1_OutBytes[1].0 := stB1_Out.bSpeed1_MotorA;
+stB1_OutBytes[1].1 := stB1_Out.bSpeed2_MotorA;
+stB1_OutBytes[1].2 := stB1_Out.bSpeed3_MotorA;
+stB1_OutBytes[1].3 := stB1_Out.bSpeed4_MotorA;
+stB1_OutBytes[1].4 := stB1_Out.bSpeed1_MotorB;
+stB1_OutBytes[1].5 := stB1_Out.bSpeed2_MotorB;
+stB1_OutBytes[1].6 := stB1_Out.bSpeed3_MotorB;
+stB1_OutBytes[1].7 := stB1_Out.bSpeed4_MotorB;
+
+stB1_OutBytes[2].0 := stB1_Out.bDisableAccelMotorA;
+stB1_OutBytes[2].1 := stB1_Out.bDisableAccelMotorB;
+stB1_OutBytes[2].2 := stB1_Out.bDisableDecelMotorA;
+stB1_OutBytes[2].3 := stB1_Out.bDisableDecelMotorB;
+stB1_OutBytes[2].4 := stB1_Out.bReverseMotorA;
+stB1_OutBytes[2].5 := stB1_Out.bReverseMotorB;
+stB1_OutBytes[2].6 := stB1_Out.bResetErrMotorA;
+stB1_OutBytes[2].7 := stB1_Out.bResetErrMotorB;
+
+stB1_OutBytes[3].0 := stB1_Out.bRemoteOut1;
+stB1_OutBytes[3].1 := stB1_Out.bRemoteOut2;
+stB1_OutBytes[3].2 := stB1_Out.bRemoteOut3;
+stB1_OutBytes[3].3 := stB1_Out.bRemoteOut4;
+stB1_OutBytes[3].4 := stB1_Out.bRemoteOut5;
+
+
+// =========================================================================
+// CONVEYOR B - MODULE B2
+// =========================================================================
+stB2_In.bSensorA             := stB2_InBytes[4].0;
+stB2_In.bSensorB             := stB2_InBytes[4].1;
+stB2_In.bSensorAlarmA        := stB2_InBytes[4].2;
+stB2_In.bSensorAlarmB        := stB2_InBytes[4].3;
+stB2_In.bMotorARunning       := stB2_InBytes[4].4;
+stB2_In.bMotorBRunning       := stB2_InBytes[4].5;
+
+stB2_In.bErrMotorA_BackEMF   := stB2_InBytes[5].0;
+stB2_In.bErrMotorA_Current   := stB2_InBytes[5].1;
+stB2_In.bErrMotorA_Thermal   := stB2_InBytes[5].2;
+stB2_In.bErrDriverA_Thermal  := stB2_InBytes[5].3;
+stB2_In.bErrMotorA_Stalled   := stB2_InBytes[5].4;
+stB2_In.bErrMotorA_Unplugged := stB2_InBytes[5].5;
+stB2_In.bErrMotorA_Jam       := stB2_InBytes[5].6;
+stB2_In.bErrMotorA_Sensor    := stB2_InBytes[5].7;
+
+stB2_In.bErrMotorB_BackEMF   := stB2_InBytes[6].0;
+stB2_In.bErrMotorB_Current   := stB2_InBytes[6].1;
+stB2_In.bErrMotorB_Thermal   := stB2_InBytes[6].2;
+stB2_In.bErrDriverB_Thermal  := stB2_InBytes[6].3;
+stB2_In.bErrMotorB_Stalled   := stB2_InBytes[6].4;
+stB2_In.bErrMotorB_Unplugged := stB2_InBytes[6].5;
+stB2_In.bErrMotorB_Jam       := stB2_InBytes[6].6;
+stB2_In.bErrMotorB_Sensor    := stB2_InBytes[6].7;
+
+stB2_In.bRemoteIn1           := stB2_InBytes[7].0;
+stB2_In.bRemoteIn2           := stB2_InBytes[7].1;
+stB2_In.bRemoteIn3           := stB2_InBytes[7].2;
+
+
+
+stB2_OutBytes[0].0 := stB2_Out.bRunMotorA;
+stB2_OutBytes[0].1 := stB2_Out.bRunMotorB;
+
+stB2_OutBytes[1].0 := stB2_Out.bSpeed1_MotorA;
+stB2_OutBytes[1].1 := stB2_Out.bSpeed2_MotorA;
+stB2_OutBytes[1].2 := stB2_Out.bSpeed3_MotorA;
+stB2_OutBytes[1].3 := stB2_Out.bSpeed4_MotorA;
+stB2_OutBytes[1].4 := stB2_Out.bSpeed1_MotorB;
+stB2_OutBytes[1].5 := stB2_Out.bSpeed2_MotorB;
+stB2_OutBytes[1].6 := stB2_Out.bSpeed3_MotorB;
+stB2_OutBytes[1].7 := stB2_Out.bSpeed4_MotorB;
+
+stB2_OutBytes[2].0 := stB2_Out.bDisableAccelMotorA;
+stB2_OutBytes[2].1 := stB2_Out.bDisableAccelMotorB;
+stB2_OutBytes[2].2 := stB2_Out.bDisableDecelMotorA;
+stB2_OutBytes[2].3 := stB2_Out.bDisableDecelMotorB;
+stB2_OutBytes[2].4 := stB2_Out.bReverseMotorA;
+stB2_OutBytes[2].5 := stB2_Out.bReverseMotorB;
+stB2_OutBytes[2].6 := stB2_Out.bResetErrMotorA;
+stB2_OutBytes[2].7 := stB2_Out.bResetErrMotorB;
+
+stB2_OutBytes[3].0 := stB2_Out.bRemoteOut1;
+stB2_OutBytes[3].1 := stB2_Out.bRemoteOut2;
+stB2_OutBytes[3].2 := stB2_Out.bRemoteOut3;
+stB2_OutBytes[3].3 := stB2_Out.bRemoteOut4;
+stB2_OutBytes[3].4 := stB2_Out.bRemoteOut5;
+
+
+// =========================================================================
+// CONVEYOR B - MODULE B3
+// =========================================================================
+stB3_In.bSensorA             := stB3_InBytes[4].0;
+stB3_In.bSensorB             := stB3_InBytes[4].1;
+stB3_In.bSensorAlarmA        := stB3_InBytes[4].2;
+stB3_In.bSensorAlarmB        := stB3_InBytes[4].3;
+stB3_In.bMotorARunning       := stB3_InBytes[4].4;
+stB3_In.bMotorBRunning       := stB3_InBytes[4].5;
+
+stB3_In.bErrMotorA_BackEMF   := stB3_InBytes[5].0;
+stB3_In.bErrMotorA_Current   := stB3_InBytes[5].1;
+stB3_In.bErrMotorA_Thermal   := stB3_InBytes[5].2;
+stB3_In.bErrDriverA_Thermal  := stB3_InBytes[5].3;
+stB3_In.bErrMotorA_Stalled   := stB3_InBytes[5].4;
+stB3_In.bErrMotorA_Unplugged := stB3_InBytes[5].5;
+stB3_In.bErrMotorA_Jam       := stB3_InBytes[5].6;
+stB3_In.bErrMotorA_Sensor    := stB3_InBytes[5].7;
+
+stB3_In.bErrMotorB_BackEMF   := stB3_InBytes[6].0;
+stB3_In.bErrMotorB_Current   := stB3_InBytes[6].1;
+stB3_In.bErrMotorB_Thermal   := stB3_InBytes[6].2;
+stB3_In.bErrDriverB_Thermal  := stB3_InBytes[6].3;
+stB3_In.bErrMotorB_Stalled   := stB3_InBytes[6].4;
+stB3_In.bErrMotorB_Unplugged := stB3_InBytes[6].5;
+stB3_In.bErrMotorB_Jam       := stB3_InBytes[6].6;
+stB3_In.bErrMotorB_Sensor    := stB3_InBytes[6].7;
+
+stB3_In.bRemoteIn1           := stB3_InBytes[7].0;
+stB3_In.bRemoteIn2           := stB3_InBytes[7].1;
+stB3_In.bRemoteIn3           := stB3_InBytes[7].2;
+
+
+stB3_OutBytes[0].0 := stB3_Out.bRunMotorA;
+stB3_OutBytes[0].1 := stB3_Out.bRunMotorB;
+
+stB3_OutBytes[1].0 := stB3_Out.bSpeed1_MotorA;
+stB3_OutBytes[1].1 := stB3_Out.bSpeed2_MotorA;
+stB3_OutBytes[1].2 := stB3_Out.bSpeed3_MotorA;
+stB3_OutBytes[1].3 := stB3_Out.bSpeed4_MotorA;
+stB3_OutBytes[1].4 := stB3_Out.bSpeed1_MotorB;
+stB3_OutBytes[1].5 := stB3_Out.bSpeed2_MotorB;
+stB3_OutBytes[1].6 := stB3_Out.bSpeed3_MotorB;
+stB3_OutBytes[1].7 := stB3_Out.bSpeed4_MotorB;
+
+stB3_OutBytes[2].0 := stB3_Out.bDisableAccelMotorA;
+stB3_OutBytes[2].1 := stB3_Out.bDisableAccelMotorB;
+stB3_OutBytes[2].2 := stB3_Out.bDisableDecelMotorA;
+stB3_OutBytes[2].3 := stB3_Out.bDisableDecelMotorB;
+stB3_OutBytes[2].4 := stB3_Out.bReverseMotorA;
+stB3_OutBytes[2].5 := stB3_Out.bReverseMotorB;
+stB3_OutBytes[2].6 := stB3_Out.bResetErrMotorA;
+stB3_OutBytes[2].7 := stB3_Out.bResetErrMotorB;
+
+stB3_OutBytes[3].0 := stB3_Out.bRemoteOut1;
+stB3_OutBytes[3].1 := stB3_Out.bRemoteOut2;
+stB3_OutBytes[3].2 := stB3_Out.bRemoteOut3;
+stB3_OutBytes[3].3 := stB3_Out.bRemoteOut4;
+stB3_OutBytes[3].4 := stB3_Out.bRemoteOut5;
+
+
+// =========================================================================
+// CONVEYOR B - MODULE B4
+// =========================================================================
+stB4_In.bSensorA             := stB4_InBytes[4].0;
+stB4_In.bSensorB             := stB4_InBytes[4].1;
+stB4_In.bSensorAlarmA        := stB4_InBytes[4].2;
+stB4_In.bSensorAlarmB        := stB4_InBytes[4].3;
+stB4_In.bMotorARunning       := stB4_InBytes[4].4;
+stB4_In.bMotorBRunning       := stB4_InBytes[4].5;
+
+stB4_In.bErrMotorA_BackEMF   := stB4_InBytes[5].0;
+stB4_In.bErrMotorA_Current   := stB4_InBytes[5].1;
+stB4_In.bErrMotorA_Thermal   := stB4_InBytes[5].2;
+stB4_In.bErrDriverA_Thermal  := stB4_InBytes[5].3;
+stB4_In.bErrMotorA_Stalled   := stB4_InBytes[5].4;
+stB4_In.bErrMotorA_Unplugged := stB4_InBytes[5].5;
+stB4_In.bErrMotorA_Jam       := stB4_InBytes[5].6;
+stB4_In.bErrMotorA_Sensor    := stB4_InBytes[5].7;
+
+stB4_In.bErrMotorB_BackEMF   := stB4_InBytes[6].0;
+stB4_In.bErrMotorB_Current   := stB4_InBytes[6].1;
+stB4_In.bErrMotorB_Thermal   := stB4_InBytes[6].2;
+stB4_In.bErrDriverB_Thermal  := stB4_InBytes[6].3;
+stB4_In.bErrMotorB_Stalled   := stB4_InBytes[6].4;
+stB4_In.bErrMotorB_Unplugged := stB4_InBytes[6].5;
+stB4_In.bErrMotorB_Jam       := stB4_InBytes[6].6;
+stB4_In.bErrMotorB_Sensor    := stB4_InBytes[6].7;
+
+stB4_In.bRemoteIn1           := stB4_InBytes[7].0;
+stB4_In.bRemoteIn2           := stB4_InBytes[7].1;
+stB4_In.bRemoteIn3           := stB4_InBytes[7].2;
+
+
+stB4_OutBytes[0].0 := stB4_Out.bRunMotorA;
+stB4_OutBytes[0].1 := stB4_Out.bRunMotorB;
+
+stB4_OutBytes[1].0 := stB4_Out.bSpeed1_MotorA;
+stB4_OutBytes[1].1 := stB4_Out.bSpeed2_MotorA;
+stB4_OutBytes[1].2 := stB4_Out.bSpeed3_MotorA;
+stB4_OutBytes[1].3 := stB4_Out.bSpeed4_MotorA;
+stB4_OutBytes[1].4 := stB4_Out.bSpeed1_MotorB;
+stB4_OutBytes[1].5 := stB4_Out.bSpeed2_MotorB;
+stB4_OutBytes[1].6 := stB4_Out.bSpeed3_MotorB;
+stB4_OutBytes[1].7 := stB4_Out.bSpeed4_MotorB;
+
+stB4_OutBytes[2].0 := stB4_Out.bDisableAccelMotorA;
+stB4_OutBytes[2].1 := stB4_Out.bDisableAccelMotorB;
+stB4_OutBytes[2].2 := stB4_Out.bDisableDecelMotorA;
+stB4_OutBytes[2].3 := stB4_Out.bDisableDecelMotorB;
+stB4_OutBytes[2].4 := stB4_Out.bReverseMotorA;
+stB4_OutBytes[2].5 := stB4_Out.bReverseMotorB;
+stB4_OutBytes[2].6 := stB4_Out.bResetErrMotorA;
+stB4_OutBytes[2].7 := stB4_Out.bResetErrMotorB;
+
+stB4_OutBytes[3].0 := stB4_Out.bRemoteOut1;
+stB4_OutBytes[3].1 := stB4_Out.bRemoteOut2;
+stB4_OutBytes[3].2 := stB4_Out.bRemoteOut3;
+stB4_OutBytes[3].3 := stB4_Out.bRemoteOut4;
+stB4_OutBytes[3].4 := stB4_Out.bRemoteOut5;
+
+
+// Reverse Motors 
+stA1_Out.bReverseMotorA := TRUE;
+stA1_Out.bReverseMotorB := TRUE;
+
+stA2_Out.bReverseMotorA := TRUE;
+stA2_Out.bReverseMotorB := TRUE;
+
+stA3_Out.bReverseMotorA := TRUE;
+stA3_Out.bReverseMotorB := TRUE;
+
+stA4_Out.bReverseMotorA := TRUE;
+stA4_Out.bReverseMotorB := TRUE;
+
+stA5_Out.bReverseMotorA := TRUE;
+stA5_Out.bReverseMotorB := TRUE;
+
+stA6_Out.bReverseMotorA := TRUE;
+stA6_Out.bReverseMotorB := TRUE;
+
+stA7_Out.bReverseMotorA := TRUE;
+stA7_Out.bReverseMotorB := TRUE;
+
+stA8_Out.bReverseMotorA := TRUE;
+stA8_Out.bReverseMotorB := TRUE;
+
+stB1_Out.bReverseMotorA := TRUE;
+stB1_Out.bReverseMotorB := TRUE;
+
+stB2_Out.bReverseMotorA := TRUE;
+stB2_Out.bReverseMotorB := TRUE;
+
+stB3_Out.bReverseMotorA := TRUE;
+stB3_Out.bReverseMotorB := TRUE;
+
+stB4_Out.bReverseMotorA := TRUE;
+stB4_Out.bReverseMotorB := TRUE;
+
+
+
+
+// =========================================================================
+// SPEED 3 SELECTION LOGIC (CONVEYOR A: MODULES A1 - A8)
+// =========================================================================
+
+// Module A1
+stA1_Out.bSpeed1_MotorA := FALSE; stA1_Out.bSpeed2_MotorA := FALSE; stA1_Out.bSpeed3_MotorA := stA1_Out.bRunMotorA; stA1_Out.bSpeed4_MotorA := FALSE;
+stA1_Out.bSpeed1_MotorB := FALSE; stA1_Out.bSpeed2_MotorB := FALSE; stA1_Out.bSpeed3_MotorB := stA1_Out.bRunMotorB; stA1_Out.bSpeed4_MotorB := FALSE;
+
+// Module A2
+stA2_Out.bSpeed1_MotorA := FALSE; stA2_Out.bSpeed2_MotorA := FALSE; stA2_Out.bSpeed3_MotorA := stA2_Out.bRunMotorA; stA2_Out.bSpeed4_MotorA := FALSE;
+stA2_Out.bSpeed1_MotorB := FALSE; stA2_Out.bSpeed2_MotorB := FALSE; stA2_Out.bSpeed3_MotorB := stA2_Out.bRunMotorB; stA2_Out.bSpeed4_MotorB := FALSE;
+
+// Module A3
+stA3_Out.bSpeed1_MotorA := FALSE; stA3_Out.bSpeed2_MotorA := FALSE; stA3_Out.bSpeed3_MotorA := stA3_Out.bRunMotorA; stA3_Out.bSpeed4_MotorA := FALSE;
+stA3_Out.bSpeed1_MotorB := FALSE; stA3_Out.bSpeed2_MotorB := FALSE; stA3_Out.bSpeed3_MotorB := stA3_Out.bRunMotorB; stA3_Out.bSpeed4_MotorB := FALSE;
+
+// Module A4
+stA4_Out.bSpeed1_MotorA := FALSE; stA4_Out.bSpeed2_MotorA := FALSE; stA4_Out.bSpeed3_MotorA := stA4_Out.bRunMotorA; stA4_Out.bSpeed4_MotorA := FALSE;
+stA4_Out.bSpeed1_MotorB := FALSE; stA4_Out.bSpeed2_MotorB := FALSE; stA4_Out.bSpeed3_MotorB := stA4_Out.bRunMotorB; stA4_Out.bSpeed4_MotorB := FALSE;
+
+// Module A5
+stA5_Out.bSpeed1_MotorA := FALSE; stA5_Out.bSpeed2_MotorA := FALSE; stA5_Out.bSpeed3_MotorA := stA5_Out.bRunMotorA; stA5_Out.bSpeed4_MotorA := FALSE;
+stA5_Out.bSpeed1_MotorB := FALSE; stA5_Out.bSpeed2_MotorB := FALSE; stA5_Out.bSpeed3_MotorB := stA5_Out.bRunMotorB; stA5_Out.bSpeed4_MotorB := FALSE;
+
+// Module A6
+stA6_Out.bSpeed1_MotorA := FALSE; stA6_Out.bSpeed2_MotorA := FALSE; stA6_Out.bSpeed3_MotorA := stA6_Out.bRunMotorA; stA6_Out.bSpeed4_MotorA := FALSE;
+stA6_Out.bSpeed1_MotorB := FALSE; stA6_Out.bSpeed2_MotorB := FALSE; stA6_Out.bSpeed3_MotorB := stA6_Out.bRunMotorB; stA6_Out.bSpeed4_MotorB := FALSE;
+
+// Module A7
+stA7_Out.bSpeed1_MotorA := FALSE; stA7_Out.bSpeed2_MotorA := FALSE; stA7_Out.bSpeed3_MotorA := stA7_Out.bRunMotorA; stA7_Out.bSpeed4_MotorA := FALSE;
+stA7_Out.bSpeed1_MotorB := FALSE; stA7_Out.bSpeed2_MotorB := FALSE; stA7_Out.bSpeed3_MotorB := stA7_Out.bRunMotorB; stA7_Out.bSpeed4_MotorB := FALSE;
+
+// Module A8
+stA8_Out.bSpeed1_MotorA := FALSE; stA8_Out.bSpeed2_MotorA := FALSE; stA8_Out.bSpeed3_MotorA := stA8_Out.bRunMotorA; stA8_Out.bSpeed4_MotorA := FALSE;
+stA8_Out.bSpeed1_MotorB := FALSE; stA8_Out.bSpeed2_MotorB := FALSE; stA8_Out.bSpeed3_MotorB := stA8_Out.bRunMotorB; stA8_Out.bSpeed4_MotorB := FALSE;
+
+
+// =========================================================================
+// SPEED 3 SELECTION LOGIC (CONVEYOR B: MODULES B1 - B4)
+// =========================================================================
+
+// Module B1
+stB1_Out.bSpeed1_MotorA := FALSE; stB1_Out.bSpeed2_MotorA := FALSE; stB1_Out.bSpeed3_MotorA := stB1_Out.bRunMotorA; stB1_Out.bSpeed4_MotorA := FALSE;
+stB1_Out.bSpeed1_MotorB := FALSE; stB1_Out.bSpeed2_MotorB := FALSE; stB1_Out.bSpeed3_MotorB := stB1_Out.bRunMotorB; stB1_Out.bSpeed4_MotorB := FALSE;
+
+// Module B2
+stB2_Out.bSpeed1_MotorA := FALSE; stB2_Out.bSpeed2_MotorA := FALSE; stB2_Out.bSpeed3_MotorA := stB2_Out.bRunMotorA; stB2_Out.bSpeed4_MotorA := FALSE;
+stB2_Out.bSpeed1_MotorB := FALSE; stB2_Out.bSpeed2_MotorB := FALSE; stB2_Out.bSpeed3_MotorB := stB2_Out.bRunMotorB; stB2_Out.bSpeed4_MotorB := FALSE;
+
+// Module B3
+stB3_Out.bSpeed1_MotorA := FALSE; stB3_Out.bSpeed2_MotorA := FALSE; stB3_Out.bSpeed3_MotorA := stB3_Out.bRunMotorA; stB3_Out.bSpeed4_MotorA := FALSE;
+stB3_Out.bSpeed1_MotorB := FALSE; stB3_Out.bSpeed2_MotorB := FALSE; stB3_Out.bSpeed3_MotorB := stB3_Out.bRunMotorB; stB3_Out.bSpeed4_MotorB := FALSE;
+
+// Module B4
+stB4_Out.bSpeed1_MotorA := FALSE; stB4_Out.bSpeed2_MotorA := FALSE; stB4_Out.bSpeed3_MotorA := stB4_Out.bRunMotorA; stB4_Out.bSpeed4_MotorA := FALSE;
+stB4_Out.bSpeed1_MotorB := FALSE; stB4_Out.bSpeed2_MotorB := FALSE; stB4_Out.bSpeed3_MotorB := stB4_Out.bRunMotorB; stB4_Out.bSpeed4_MotorB := FALSE;
+
+
+// Place at the bottom of ACT_MapIO action:
+
+// Module Reset Commands (Conveyor A)
+stA1_Out.bResetErrMotorA := fbSystemControl.bResetFaults; stA1_Out.bResetErrMotorB := fbSystemControl.bResetFaults;
+stA2_Out.bResetErrMotorA := fbSystemControl.bResetFaults; stA2_Out.bResetErrMotorB := fbSystemControl.bResetFaults;
+stA3_Out.bResetErrMotorA := fbSystemControl.bResetFaults; stA3_Out.bResetErrMotorB := fbSystemControl.bResetFaults;
+stA4_Out.bResetErrMotorA := fbSystemControl.bResetFaults; stA4_Out.bResetErrMotorB := fbSystemControl.bResetFaults;
+stA5_Out.bResetErrMotorA := fbSystemControl.bResetFaults; stA5_Out.bResetErrMotorB := fbSystemControl.bResetFaults;
+stA6_Out.bResetErrMotorA := fbSystemControl.bResetFaults; stA6_Out.bResetErrMotorB := fbSystemControl.bResetFaults;
+stA7_Out.bResetErrMotorA := fbSystemControl.bResetFaults; stA7_Out.bResetErrMotorB := fbSystemControl.bResetFaults;
+stA8_Out.bResetErrMotorA := fbSystemControl.bResetFaults; stA8_Out.bResetErrMotorB := fbSystemControl.bResetFaults;
+
+// Module Reset Commands (Conveyor B)
+stB1_Out.bResetErrMotorA := fbSystemControl.bResetFaults; stB1_Out.bResetErrMotorB := fbSystemControl.bResetFaults;
+stB2_Out.bResetErrMotorA := fbSystemControl.bResetFaults; stB2_Out.bResetErrMotorB := fbSystemControl.bResetFaults;
+stB3_Out.bResetErrMotorA := fbSystemControl.bResetFaults; stB3_Out.bResetErrMotorB := fbSystemControl.bResetFaults;
+stB4_Out.bResetErrMotorA := fbSystemControl.bResetFaults; stB4_Out.bResetErrMotorB := fbSystemControl.bResetFaults;]]></ST>
+      </Implementation>
+    </Action>
+    <LineIds Name="MAIN">
+      <LineId Id="1049" Count="59" />
+      <LineId Id="1047" Count="0" />
+      <LineId Id="1334" Count="12" />
+      <LineId Id="1333" Count="0" />
+      <LineId Id="1048" Count="0" />
+      <LineId Id="860" Count="3" />
+      <LineId Id="1355" Count="10" />
+      <LineId Id="874" Count="11" />
+      <LineId Id="1315" Count="0" />
+      <LineId Id="886" Count="11" />
+      <LineId Id="1313" Count="0" />
+      <LineId Id="898" Count="11" />
+      <LineId Id="1316" Count="0" />
+      <LineId Id="910" Count="11" />
+      <LineId Id="1317" Count="0" />
+      <LineId Id="922" Count="11" />
+      <LineId Id="1318" Count="0" />
+      <LineId Id="934" Count="11" />
+      <LineId Id="1319" Count="0" />
+      <LineId Id="946" Count="23" />
+      <LineId Id="1320" Count="0" />
+      <LineId Id="970" Count="11" />
+      <LineId Id="1321" Count="0" />
+      <LineId Id="982" Count="1" />
+      <LineId Id="1247" Count="23" />
+      <LineId Id="1322" Count="0" />
+      <LineId Id="1007" Count="0" />
+      <LineId Id="1158" Count="0" />
+      <LineId Id="1170" Count="14" />
+      <LineId Id="1323" Count="0" />
+      <LineId Id="1185" Count="11" />
+      <LineId Id="1324" Count="0" />
+      <LineId Id="1197" Count="11" />
+      <LineId Id="1325" Count="0" />
+      <LineId Id="1209" Count="11" />
+      <LineId Id="1326" Count="0" />
+      <LineId Id="1221" Count="0" />
+      <LineId Id="1271" Count="9" />
+      <LineId Id="1327" Count="0" />
+      <LineId Id="1281" Count="13" />
+      <LineId Id="1328" Count="0" />
+      <LineId Id="1008" Count="1" />
+      <LineId Id="1109" Count="34" />
+      <LineId Id="1298" Count="12" />
+      <LineId Id="2" Count="0" />
+      <LineId Id="1312" Count="0" />
+      <LineId Id="1311" Count="0" />
+    </LineIds>
+    <LineIds Name="MAIN.ACT_MapIO">
+      <LineId Id="2731" Count="856" />
+      <LineId Id="1867" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

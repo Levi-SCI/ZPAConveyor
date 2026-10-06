@@ -1,0 +1,45 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <DUT Name="ST_IBE03B_Outputs" Id="{bec71438-fd4b-4ebc-bd4b-3a64d74cecea}">
+    <Declaration><![CDATA[TYPE ST_IBE03B_Outputs :
+STRUCT
+	// Out[0] - Motor Commands & Discrete Output Ports
+	bRunMotorA			: BOOL; // Bit 0: Run Motor A[cite: 250]
+	bRunMotorB			: BOOL; // Bit 1: Run Motor B[cite: 250]
+	bDiscreteOutU_MotorA: BOOL; // Bit 2: Motor A Port U[cite: 250]
+	bDiscreteOutV_MotorA: BOOL; // Bit 3: Motor A Port V[cite: 250]
+	bDiscreteOutW_MotorA: BOOL; // Bit 4: Motor A Port W[cite: 250]
+	bDiscreteOutU_MotorB: BOOL; // Bit 5: Motor B Port U[cite: 250]
+	bDiscreteOutV_MotorB: BOOL; // Bit 6: Motor B Port V[cite: 250]
+	bDiscreteOutW_MotorB: BOOL; // Bit 7: Motor B Port W[cite: 250]
+
+	// Out[1] - Speed Selection Presets (Motor A & Motor B)
+	bSpeed1_MotorA		: BOOL; // Bit 0: Speed 1 Motor A[cite: 250]
+	bSpeed2_MotorA		: BOOL; // Bit 1: Speed 2 Motor A[cite: 250]
+	bSpeed3_MotorA		: BOOL; // Bit 2: Speed 3 Motor A[cite: 250]
+	bSpeed4_MotorA		: BOOL; // Bit 3: Speed 4 Motor A[cite: 250]
+	bSpeed1_MotorB		: BOOL; // Bit 4: Speed 1 Motor B[cite: 250]
+	bSpeed2_MotorB		: BOOL; // Bit 5: Speed 2 Motor B[cite: 250]
+	bSpeed3_MotorB		: BOOL; // Bit 6: Speed 3 Motor B[cite: 250]
+	bSpeed4_MotorB		: BOOL; // Bit 7: Speed 4 Motor B[cite: 250]
+
+	// Out[2] - Accel/Decel Override, Direction & Error Reset
+	bDisableAccelMotorA	: BOOL; // Bit 0: Disable Accel Motor A[cite: 250]
+	bDisableAccelMotorB	: BOOL; // Bit 1: Disable Accel Motor B[cite: 250]
+	bDisableDecelMotorA	: BOOL; // Bit 2: Disable Decel Motor A[cite: 250]
+	bDisableDecelMotorB	: BOOL; // Bit 3: Disable Decel Motor B[cite: 250]
+	bReverseMotorA		: BOOL; // Bit 4: Reverse Direction Motor A[cite: 250]
+	bReverseMotorB		: BOOL; // Bit 5: Reverse Direction Motor B[cite: 250]
+	bResetErrMotorA		: BOOL; // Bit 6: Clear Fault Motor A[cite: 250]
+	bResetErrMotorB		: BOOL; // Bit 7: Clear Fault Motor B[cite: 250]
+
+	// Out[3] - Auxiliary Remote Outputs
+	bRemoteOut1			: BOOL; // Bit 0: Auxiliary Output 1 (1A max)[cite: 174, 250]
+	bRemoteOut2			: BOOL; // Bit 1: Auxiliary Output 2 (1A max)[cite: 174, 250]
+	bRemoteOut3			: BOOL; // Bit 2: Auxiliary Output 3 (20mA max)[cite: 174, 250]
+	bRemoteOut4			: BOOL; // Bit 3: Auxiliary Output 4 (20mA max)[cite: 174, 250]
+	bRemoteOut5			: BOOL; // Bit 4: Auxiliary Output 5 (20mA max)[cite: 174, 250]
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

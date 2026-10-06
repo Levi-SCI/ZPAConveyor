@@ -1,0 +1,120 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.16">
+  <POU Name="FB_ZPA_Zone" Id="{273b4d6e-8760-4a15-bda1-3bd337dd5710}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_ZPA_ZONE
+VAR_INPUT
+    bEnable             : BOOL; // System Run Enable
+    bTandemMode         : BOOL; // Master Tandem Mode Active
+    bIsTandemSlave      : BOOL; // TRUE if this zone is a slave zone
+    bPE                 : BOOL; // Local Photo-Eye (TRUE = Blocked)
+    bUpstreamArrival    : BOOL; // Upstream zone is delivering a tote
+    bDownstreamOccupied : BOOL; // Downstream zone has a tote
+    bDownstreamReady    : BOOL; // Downstream zone is ready to receive
+    bTandemMasterRun    : BOOL; // Run signal from Tandem Master
+    bTandemSlavePE      : BOOL; // Photo-eye from Tandem Slave zone
+    bJogOverride        : BOOL; // Manual Jog Input
+    tStopDelay          : TIME := T#1S500MS; // Offload coast time after PE clears
+    tJamTime            : TIME := T#5S;      // PE Jam Fault timeout
+	bReset				: BOOL;
+END_VAR
+
+VAR_OUTPUT
+    bRunMotor           : BOOL; // Command to spin zone motor
+    bOccupied           : BOOL; // Zone has a tote present
+    bReadyToReceive     : BOOL; // Zone is clear and ready for upstream tote
+    bJamFault           : BOOL; // PE blocked too long fault
+END_VAR
+
+VAR
+    bEffectivePE        : BOOL;
+	bStopPE             : BOOL; // Stop trigger sensor (Slave PE in Tandem, Local PE in Single)
+    fbOffloadTimer      : TOF;  // Timer Off-Delay for zone discharge coast
+    fbJamTimer          : TON;  // Timer On-Delay for jam detection
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// =========================================================================
+// 1. TANDEM MODE PE EVALUATION
+// =========================================================================
+IF bTandemMode AND NOT bIsTandemSlave THEN
+    bEffectivePE := bPE OR bTandemSlavePE; // Presence & Jam tracking across whole tandem zone
+    bStopPE      := bTandemSlavePE;       // Stop point is the SLAVE sensor at the front of the zone
+ELSE
+    bEffectivePE := bPE;
+    bStopPE      := bPE;                  // Standard stop point is local zone sensor
+END_IF;
+
+// =========================================================================
+// 2. UNCONDITIONAL JAM TIMER & FAULT RESET (MUST RUN BEFORE ANY RETURN)
+// =========================================================================
+// NOT bJamFault AND NOT bReset resets the TON accumulator to 0ms when faulted or resetting
+fbJamTimer(
+    IN := bEffectivePE AND bRunMotor AND NOT bJogOverride AND NOT bJamFault AND NOT bReset,
+    PT := tJamTime
+);
+
+// Clear fault on reset pulse OR when sensor physically clears
+IF bReset OR NOT bEffectivePE THEN
+    bJamFault := FALSE;
+ELSIF fbJamTimer.Q THEN
+    bJamFault := TRUE;
+END_IF;
+
+// =========================================================================
+// 3. TANDEM SLAVE EXECUTION
+// =========================================================================
+IF bTandemMode AND bIsTandemSlave THEN
+    bRunMotor       := bTandemMasterRun AND bEnable;
+    bOccupied       := bEffectivePE;
+    bReadyToReceive := NOT bOccupied;
+    RETURN; 
+END_IF;
+
+// =========================================================================
+// 4. SYSTEM DISABLED STATE
+// =========================================================================
+IF NOT bEnable AND NOT bJogOverride THEN
+    bRunMotor       := FALSE;
+    bOccupied       := bEffectivePE;
+    bReadyToReceive := FALSE;
+    RETURN;
+END_IF;
+
+// =========================================================================
+// 5. OCCUPANCY & OFFLOAD COAST TIMER (TOF)
+// =========================================================================
+fbOffloadTimer(
+    IN := bEffectivePE,
+    PT := tStopDelay
+);
+
+bOccupied := fbOffloadTimer.Q;
+
+// =========================================================================
+// 6. CORE ZPA MOTOR CONTROL LOGIC
+// =========================================================================
+IF bJogOverride THEN
+    bRunMotor := TRUE;
+ELSIF (bUpstreamArrival AND NOT bStopPE) THEN
+    bRunMotor := TRUE;
+ELSIF bOccupied AND (NOT bDownstreamOccupied OR bDownstreamReady) THEN
+    bRunMotor := TRUE;
+ELSIF bOccupied AND NOT bStopPE THEN
+    // Keeps both motors running until the leading edge reaches the stop sensor (bStopPE)
+    bRunMotor := TRUE;
+ELSE
+    bRunMotor := FALSE; // Stop & accumulate once bStopPE is hit
+END_IF;
+// =========================================================================
+// 7. UPSTREAM HANDSHAKE
+// =========================================================================
+bReadyToReceive := NOT bOccupied;]]></ST>
+    </Implementation>
+    <LineIds Name="FB_ZPA_Zone">
+      <LineId Id="301" Count="8" />
+      <LineId Id="236" Count="47" />
+      <LineId Id="310" Count="13" />
+      <LineId Id="296" Count="3" />
+      <LineId Id="9" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>
